@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Workspace layout prototype</title>
+    <link rel="stylesheet" href="../../packages/ui/src/tokens.css" />
+    <style>
+      body {
+        margin: 0;
+        color: var(--text);
+        background: var(--surface);
+        font: 14px sans-serif;
+      }
+      header {
+        box-sizing: border-box;
+        height: 40px;
+        padding: 10px;
+        background: var(--surface-2);
+      }
+      aside {
+        position: absolute;
+        box-sizing: border-box;
+      }
+      aside {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        overflow: auto;
+      }
+      .panel-content {
+        padding: 16px;
+        zoom: var(--ui-scale);
+      }
+      .app-frame {
+        zoom: var(--ui-scale);
+      }
+      .split-divider {
+        position: fixed;
+        background: var(--border);
+      }
+      textarea {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        margin: 16px 0;
+      }
+      button,
+      textarea {
+        color: var(--text);
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+      }
+    </style>
+  </head>
+  <body>
+    <header>Document A · Document B — isolated layout prototype</header>
+    <div id="react-divider"></div>
+    <aside aria-label="AI assistant prototype">
+      <button id="rail" hidden>AI</button>
+      <div class="panel-content">
+        <h2>AI assistant</h2>
+        <p>Conversation: synthetic comparison</p>
+        <p>Edit: document B<br />Reference: document A</p>
+        <textarea aria-label="Synthetic request">Read A and draft a change for B.</textarea>
+        <button id="fake-response">Show local fake response</button>
+        <p id="result" role="status"></p>
+      </div>
+    </aside>
+    <script>
+      function place(element, rect) {
+        element.hidden = !rect
+        if (!rect) return
+        Object.assign(element.style, {
+          left: rect.x + 'px',
+          top: rect.y + 'px',
+          width: rect.width + 'px',
+          height: rect.height + 'px',
+        })
+      }
+      window.arrange = ({ layout, viewport, orientation, ratio, uiScale }) => {
+        document.documentElement.style.setProperty('--ui-scale', uiScale)
+        document.querySelector('header').style.zoom = uiScale
+        place(document.querySelector('aside'), layout.panel)
+        document.querySelector('.panel-content').hidden = layout.panelMode !== 'open'
+        document.querySelector('#rail').hidden = layout.panelMode !== 'rail'
+        window.mountWorkspaceDivider(
+          orientation && {
+            aTabId: 'a',
+            bTabId: 'b',
+            focus: 'b',
+            ratio,
+            orientation,
+          },
+          { ...viewport, documents: layout.documents },
+        )
+      }
+      document.querySelector('#fake-response').onclick = () => {
+        document.querySelector('#result').textContent =
+          'Local fake result for document B; no model called.'
+      }
+      document.querySelector('#rail').onclick = (event) => {
+        event.target.textContent = 'AI ✓'
+      }
+    </script>
+  </body>
+</html>

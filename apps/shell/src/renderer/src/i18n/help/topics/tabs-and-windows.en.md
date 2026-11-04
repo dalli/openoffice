@@ -46,6 +46,8 @@ The leftmost Home tab cannot be closed; to get back from any editor, click it or
 
 ## Split view: two panes
 
+**Split view** in the tab bar opens **Side by side / Top and bottom / Unsplit**. Use Tab to focus the button, then Enter, Space or an arrow key to open the system menu; navigate with arrows and close with Escape. It uses two open documents when available. With one document, the menu explains that a separate copy will open and changes will not sync. Once split, use **Left / Right document** or **Top / Bottom document** to replace either pane; the replaced document stays open. Home, help and presentation views show why splitting is unavailable.
+
 **Drag a tab to the right edge of the window**: the tab follows as a small floating copy while a "Split here" hint appears near the edge, and dropping it gives two side-by-side panes. Drop it on the bottom edge instead to get two stacked ones. The tab's right-click menu does the same with **Split Right** and **Split Down**, and on a tab that lives in a pane it also offers **Unsplit**.
 
 - The dragged tab lands in the pane you dropped it on; the other pane keeps the document you were viewing a moment before.

@@ -46,6 +46,8 @@ La scheda Home, all'estrema sinistra, non può essere chiusa; per tornarci da un
 
 ## Visualizzazione divisa: due riquadri
 
+**Dividi vista** nella barra delle schede offre **Affiancati / Sopra e sotto / Annulla divisione**. Raggiungi il pulsante con Tab, poi usa Invio, Spazio o una freccia per aprire il menu di sistema; naviga con le frecce e chiudi con Escape. Si usano due documenti aperti quando disponibili. Con uno solo, il menu avvisa che aprirà una copia separata senza sincronizzare le modifiche. Dopo la divisione, **Documento a sinistra / a destra** o **Documento in alto / in basso** sostituisce ciascun riquadro; il documento sostituito resta aperto. Le viste iniziale, guida e presentazione spiegano perché la divisione non è disponibile.
+
 **Trascina una scheda sul bordo destro della finestra**: la scheda segue come una piccola copia flottante, vicino al bordo compare l'avviso «Dividi qui» e, se la lasci, ottieni due riquadri affiancati. Se la lasci sul bordo inferiore, ottieni due riquadri impilati. Il menu contestuale della scheda offre lo stesso con **Dividi a destra** e **Dividi in basso**, e **Annulla divisione** su una scheda che si trova in un riquadro.
 
 - La scheda trascinata finisce nel riquadro in cui l'hai lasciata; l'altro riquadro conserva il documento che stavi guardando poco prima.

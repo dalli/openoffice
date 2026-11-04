@@ -46,6 +46,8 @@ Thẻ Trang chủ ngoài cùng bên trái không thể đóng; muốn quay về 
 
 ## Chế độ chia đôi: hai khung
 
+**Chia màn hình** trên thanh thẻ mở **Xem cạnh nhau / Xem trên dưới / Bỏ chia màn hình**. Nhấn Tab để chọn nút, rồi Enter, Space hoặc phím mũi tên để mở trình đơn hệ thống; dùng mũi tên để chọn và Escape để đóng. Hai tài liệu đang mở được dùng nếu có. Khi chỉ có một tài liệu, trình đơn giải thích rằng sẽ mở bản sao riêng và không đồng bộ thay đổi. Sau khi chia, dùng **Tài liệu bên trái / bên phải** hoặc **Tài liệu phía trên / phía dưới** để đổi từng khung; tài liệu cũ vẫn mở trong thẻ. Trang chủ, trợ giúp và trình chiếu hiển thị lý do không thể chia.
+
 **Kéo một thẻ đến mép phải của cửa sổ**: thẻ đi theo như một bản sao nhỏ nổi, gần mép xuất hiện gợi ý "Chia tại đây", và khi thả ra bạn có hai khung cạnh nhau. Thả ở mép dưới thì có hai khung xếp trên dưới. Menu chuột phải của thẻ cũng làm được điều tương tự với **Chia sang phải** và **Chia xuống dưới**, và thẻ nằm trong khung có **Bỏ chia**.
 
 - Thẻ được kéo sẽ vào khung mà bạn thả nó xuống; khung còn lại giữ tài liệu bạn vừa xem lúc trước.

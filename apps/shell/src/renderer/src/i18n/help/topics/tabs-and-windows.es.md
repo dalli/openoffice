@@ -46,6 +46,8 @@ La pestaña Inicio de la izquierda no se puede cerrar; para volver desde cualqui
 
 ## Vista dividida: dos paneles
 
+**Dividir vista** en la barra de pestañas ofrece **Lado a lado / Arriba y abajo / Quitar división**. Enfoque el botón con Tab y abra el menú del sistema con Intro, Espacio o una flecha; navegue con flechas y cierre con Escape. Se usan dos documentos abiertos cuando hay suficientes. Si solo hay uno, el menú avisa de que abrirá una copia independiente sin sincronizar los cambios. Después, **Documento izquierdo / derecho** o **Documento superior / inferior** permite sustituir cada panel; el documento sustituido permanece abierto. Inicio, ayuda y presentación explican por qué no se pueden dividir.
+
 **Arrastre una pestaña al borde derecho de la ventana**: la pestaña lo sigue como una pequeña copia flotante, cerca del borde aparece el aviso «Dividir aquí» y, al soltarla, quedan dos paneles lado a lado. Si la suelta en el borde inferior, quedan dos paneles apilados. El menú contextual de la pestaña ofrece lo mismo con **Dividir a la derecha** y **Dividir abajo**, y **Quitar división** en una pestaña que está en un panel.
 
 - La pestaña arrastrada queda en el panel donde la soltó; el otro panel conserva el documento que estaba viendo justo antes.

@@ -404,6 +404,8 @@ import {
 } from '@genoffice/ui/ai-panel-prefs'
 import type { DocumentTabKind, TabKind } from '../shared/tabs-api'
 import { TABS_CHANNELS } from '../shared/tabs-api'
+import { splitMenuTemplate } from './split-menu'
+import { workspaceSplitText } from '../renderer/src/i18n/strings-workspace-split'
 import { SPLIT_TABS_CHANNELS } from '../shared/split-view-api'
 import type {
   SplitDropIntent,
@@ -411,7 +413,6 @@ import type {
   SplitOrientation,
   SplitViewState,
 } from '../shared/split-view-api'
-import { TAB_STRIP_HEIGHT } from '../shared/tab-drag-geometry'
 import { SHELL_SUBSCRIPTION_CHANNELS, isSubscriptionProviderId } from '../shared/subscription-api'
 import {
   SUBSCRIPTION_CHATGPT_USAGE_URL,
@@ -525,7 +526,13 @@ import { duplicateDocumentFile } from './tab-duplicate'
 import { closeTabsInOrder, createRecentlyClosedTracker } from './tab-lifecycle'
 import { handleTabShortcut } from './tab-shortcuts'
 import { readSplitMemory, writeSplitMemory, type SplitMemory } from './split-memory'
-import { SPLIT_EVEN_RATIO, decideSplitDrop, paneRects, splitDropZone } from './split-layout'
+import {
+  SPLIT_EVEN_RATIO,
+  clampSplitRatio,
+  decideSplitDrop,
+  paneRects,
+  splitDropZoneInRect,
+} from './split-layout'
 import { configureGenerateWindow } from './generate/generate-window'
 import { configurePdfToolsWindow, openPdfToolsWithFile } from './pdf-tools/pdf-tools-window'
 import {
@@ -7244,7 +7251,8 @@ function updateSplitHint(screenX: number, screenY: number): void {
   const manager = tabManager
   if (!drag || !manager || !shellWindow || shellWindow.isDestroyed()) return
   const bounds = shellWindow.getContentBounds()
-  const zone = splitDropZone(screenX - bounds.x, screenY - bounds.y, bounds.width, bounds.height)
+  const content = manager.documentBounds()
+  const zone = splitDropZoneInRect(screenX - bounds.x, screenY - bounds.y, content)
   if (!zone) {
     tornSplitDrop = null
     sendSplitHint(null)
@@ -7265,19 +7273,9 @@ function updateSplitHint(screenX: number, screenY: number): void {
     },
     dropped: zone,
   })
-  // the hint marks the b-side pane the drop would land in — the same window
-  // content coordinates the pane views are laid out in (bounding the space
-  // below the strip, like TabManager.contentBounds)
-  const rects = paneRects(
-    {
-      x: 0,
-      y: TAB_STRIP_HEIGHT,
-      width: bounds.width,
-      height: Math.max(0, bounds.height - TAB_STRIP_HEIGHT),
-    },
-    zone,
-    split?.ratio ?? SPLIT_EVEN_RATIO,
-  )
+  // The hint uses the same document rectangle as the live native views.
+  const ratio = clampSplitRatio(split?.ratio ?? SPLIT_EVEN_RATIO, content, zone)
+  const rects = paneRects(content, zone, ratio)
   sendSplitHint({
     left: rects.b.x,
     top: rects.b.y,
@@ -7735,6 +7733,29 @@ function registerTabsIpc(): void {
       ...(typeof x === 'number' && typeof y === 'number'
         ? { x: Math.round(x), y: Math.round(y) }
         : {}),
+    })
+  })
+  ipcMain.handle(TABS_CHANNELS.showSplitMenu, (event, x: unknown, y: unknown) => {
+    const win = shellWindow
+    const manager = tabManager
+    if (
+      !win ||
+      win.isDestroyed() ||
+      !manager ||
+      event.sender !== win.webContents ||
+      event.senderFrame !== event.sender.mainFrame ||
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    ) {
+      return
+    }
+    const menu = Menu.buildFromTemplate(
+      splitMenuTemplate(manager, (key) => workspaceSplitText(currentLang(), key)),
+    )
+    return new Promise<void>((resolve) => {
+      menu.popup({ window: win, x: Math.round(x), y: Math.round(y), callback: resolve })
     })
   })
   ipcMain.handle(TABS_CHANNELS.showMenu, (_event, x: unknown, y: unknown) => {

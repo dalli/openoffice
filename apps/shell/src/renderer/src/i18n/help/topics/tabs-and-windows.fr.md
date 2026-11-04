@@ -46,6 +46,8 @@ L’onglet Accueil le plus à gauche ne peut pas être fermé ; pour revenir d�
 
 ## Affichage scindé : deux volets
 
+**Diviser la vue** dans la barre d’onglets propose **Côte à côte / Haut et bas / Annuler la division**. Utilisez Tab pour atteindre le bouton, puis Entrée, Espace ou une flèche pour ouvrir le menu système ; parcourez-le avec les flèches et fermez-le avec Échap. Deux documents ouverts sont utilisés si possible. Avec un seul document, le menu précise qu’une copie distincte sera ouverte, sans synchronisation des modifications. Après la division, **Document de gauche / de droite** ou **Document du haut / du bas** remplace chaque volet ; le document remplacé reste ouvert. Les vues accueil, aide et présentation indiquent pourquoi la division est indisponible.
+
 **Faites glisser un onglet vers le bord droit de la fenêtre** : l’onglet suit comme une petite copie flottante, l’indication « Scinder ici » apparaît près du bord, et le déposer donne deux volets côte à côte. Déposez-le sur le bord inférieur pour deux volets empilés. Le menu contextuel de l’onglet fait de même avec **Scinder à droite** et **Scinder en bas**, et propose **Annuler la scission** sur un onglet qui se trouve dans un volet.
 
 - L’onglet déposé va dans le volet où vous l’avez lâché ; l’autre volet garde le document que vous consultiez juste avant.

@@ -46,6 +46,8 @@ Tab Laman Utama, paling kiri, tidak boleh ditutup. Untuk kembali ke sana dari ma
 
 ## Paparan terpecah: dua anak tetingkap
 
+**Bahagikan paparan** pada bar tab membuka **Bersebelahan / Atas dan bawah / Batalkan pembahagian**. Fokuskan butang dengan Tab, kemudian buka menu sistem dengan Enter, Space atau anak panah; pilih dengan anak panah dan tutup dengan Escape. Dua dokumen terbuka digunakan jika tersedia. Jika hanya satu, menu menerangkan bahawa salinan berasingan akan dibuka tanpa penyegerakan perubahan. Selepas dibahagi, **Dokumen kiri / kanan** atau **Dokumen atas / bawah** menggantikan setiap anak tetingkap; dokumen sebelumnya kekal terbuka. Paparan Utama, bantuan dan pembentangan menerangkan sebab pembahagian tidak tersedia.
+
 **Seret tab ke tepi kanan tetingkap**: tab mengikut sebagai salinan kecil terapung, petunjuk "Pecah di sini" muncul dekat tepi, dan apabila dilepaskan terhasil dua anak tetingkap bersebelahan. Lepaskan di tepi bawah untuk dua anak tetingkap bertindan. Menu klik kanan tab menawarkan perkara sama dengan **Pecah ke Kanan** dan **Pecah ke Bawah**, serta **Batal Pecah** pada tab yang berada dalam anak tetingkap.
 
 - Tab yang diseret masuk ke anak tetingkap tempat anda melepaskannya; anak tetingkap satu lagi mengekalkan dokumen yang baru anda lihat.

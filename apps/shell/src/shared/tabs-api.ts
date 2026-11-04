@@ -97,6 +97,8 @@ export interface TabsApi {
    * system menu bar and never shows the button.
    */
   showAppMenu(x: number, y: number): Promise<void>
+  /** Native split-layout and pane-document menu; resolves when the menu closes. */
+  showSplitMenu(x: number, y: number): Promise<void>
   /** move a tab to a new index in the strip; Home stays pinned at index 0 */
   reorder(id: string, toIndex: number): Promise<void>
   /** subscribe to tab list changes (open/close/activate/title updates); returns unsubscribe */
@@ -138,6 +140,7 @@ export const TABS_CHANNELS = {
   dockPreview: 'tabs:dock-preview',
   dockIndex: 'tabs:dock-index',
   showAppMenu: 'tabs:show-app-menu',
+  showSplitMenu: 'tabs:show-split-menu',
   reorder: 'tabs:reorder',
   changed: 'tabs:changed',
   chromePressed: 'tabs:chrome-pressed',

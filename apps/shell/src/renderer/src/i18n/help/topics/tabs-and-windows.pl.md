@@ -46,6 +46,8 @@ Karta strony głównej, najbardziej z lewej, nie można zamknąć; aby wrócić 
 
 ## Widok podzielony: dwa okienka
 
+**Podziel widok** na pasku kart udostępnia **Obok siebie / Jeden nad drugim / Usuń podział**. Ustaw fokus przyciskiem Tab, a następnie otwórz menu systemowe klawiszem Enter, spacją lub strzałką; poruszaj się strzałkami i zamknij klawiszem Escape. W miarę możliwości używane są dwa otwarte dokumenty. Gdy jest jeden, menu wyjaśnia, że otworzy osobną kopię bez synchronizacji zmian. Po podziale **Lewy / Prawy dokument** lub **Górny / Dolny dokument** zastępuje dane okienko; poprzedni dokument pozostaje otwarty. Ekran główny, pomoc i prezentacja wyjaśniają niedostępność podziału.
+
 **Przeciągnij kartę na prawą krawędź okna**: karta podąża jako mała unosząca się kopia, przy krawędzi pojawia się podpowiedź „Podziel tutaj”, a po upuszczeniu powstają dwa okienka obok siebie. Upuszczenie na dolnej krawędzi daje dwa okienka jedno nad drugim. Menu podręczne karty oferuje to samo przez **Podziel w prawo** i **Podziel w dół**, a przy karcie znajdującej się w okienku także **Cofnij podział**.
 
 - Przeciągnięta karta trafia do okienka, w którym ją upuszczono; drugie okienko zachowuje dokument, który był przed chwilą oglądany.

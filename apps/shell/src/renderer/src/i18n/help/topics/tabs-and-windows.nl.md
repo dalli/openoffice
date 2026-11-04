@@ -46,6 +46,8 @@ Het meest linkse Start-tabblad kan niet worden gesloten; klik erop of gebruik Be
 
 ## Gesplitste weergave: twee deelvensters
 
+**Weergave splitsen** in de tabbladenbalk biedt **Naast elkaar / Boven en onder / Splitsing opheffen**. Focus de knop met Tab en open het systeemmenu met Enter, Spatie of een pijltoets; navigeer met pijlen en sluit met Escape. Er worden zo mogelijk twee geopende documenten gebruikt. Bij één document legt het menu uit dat een aparte kopie zonder synchronisatie van wijzigingen wordt geopend. Na het splitsen vervangt **Linkerdocument / Rechterdocument** of **Bovenste document / Onderste document** elk deelvenster; het vervangen document blijft open. Startpagina, hulp en presentatie tonen waarom splitsen niet beschikbaar is.
+
 **Sleep een tabblad naar de rechterrand van het venster**: het tabblad volgt als een klein zwevend kopietje, bij de rand verschijnt de aanwijzing 'Hier splitsen' en als je het daar neerzet krijg je twee deelvensters naast elkaar. Zet je het op de onderrand neer, dan krijg je twee deelvensters boven elkaar. Het rechtermuisknopmenu van het tabblad biedt hetzelfde met **Rechts splitsen** en **Onder splitsen**, en **Splitsing opheffen** bij een tabblad dat in een deelvenster zit.
 
 - Het gesleepte tabblad komt in het deelvenster waar je het neerzette; het andere deelvenster houdt het document dat je net bekeek.

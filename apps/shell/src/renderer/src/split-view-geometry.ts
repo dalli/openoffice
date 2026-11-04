@@ -10,15 +10,16 @@ import {
   SPLIT_MIN_PANE_PX,
   type SplitOrientation,
 } from '../../shared/split-view-api'
-import { TAB_STRIP_HEIGHT } from '../../shared/tab-drag-geometry'
+import type { Rect } from '../../shared/tab-drag-geometry'
+import { workspaceLayout, type WorkspaceViewport } from '../../shared/workspace-layout'
 
 /** Share of the first pane (a) a double click on the divider restores. */
 export const SPLIT_EVEN_RATIO = 0.5
 
 /** Window content size in CSS px — the same space the pane bounds live in. */
-export interface ViewportSize {
-  width: number
-  height: number
+export interface ViewportSize extends WorkspaceViewport {
+  /** Main and renderer use the same reserved document rectangle. */
+  documents?: Rect
 }
 
 export interface DividerRect {
@@ -33,12 +34,14 @@ const EPSILON = 1e-9
 
 /** The space both panes share: everything below the tab strip's own axis. */
 function alongAxis(viewport: ViewportSize, orientation: SplitOrientation): number {
-  return orientation === 'side' ? viewport.width : viewport.height - TAB_STRIP_HEIGHT
+  const content = viewport.documents ?? workspaceLayout(viewport).documents
+  return orientation === 'side' ? content.width : content.height
 }
 
 /** Where the pane space begins along the split axis (y starts below the strip). */
-function axisStart(orientation: SplitOrientation): number {
-  return orientation === 'side' ? 0 : TAB_STRIP_HEIGHT
+function axisStart(viewport: ViewportSize, orientation: SplitOrientation): number {
+  const content = viewport.documents ?? workspaceLayout(viewport).documents
+  return orientation === 'side' ? content.x : content.y
 }
 
 /**
@@ -72,19 +75,20 @@ export function dividerRect(
   ratio: number,
 ): DividerRect {
   const share = Math.min(1, Math.max(0, ratio))
-  const offset = axisStart(orientation) + share * splitAvailablePx(viewport, orientation)
+  const content = viewport.documents ?? workspaceLayout(viewport).documents
+  const offset = axisStart(viewport, orientation) + share * splitAvailablePx(viewport, orientation)
   if (orientation === 'side') {
     return {
       left: offset,
-      top: TAB_STRIP_HEIGHT,
+      top: content.y,
       width: SPLIT_DIVIDER_PX,
-      height: Math.max(0, viewport.height - TAB_STRIP_HEIGHT),
+      height: content.height,
     }
   }
   return {
-    left: 0,
+    left: content.x,
     top: offset,
-    width: Math.max(0, viewport.width),
+    width: content.width,
     height: SPLIT_DIVIDER_PX,
   }
 }
@@ -97,7 +101,7 @@ export function ratioForDividerOffset(
 ): number {
   const available = splitAvailablePx(viewport, orientation)
   if (available <= 0) return SPLIT_EVEN_RATIO
-  return (offset - axisStart(orientation)) / available
+  return (offset - axisStart(viewport, orientation)) / available
 }
 
 /**

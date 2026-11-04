@@ -46,6 +46,8 @@ Tab Beranda paling kiri tidak bisa ditutup; untuk kembali dari editor mana pun, 
 
 ## Tampilan terbagi: dua panel
 
+**Bagi tampilan** pada bilah tab membuka **Berdampingan / Atas dan bawah / Batalkan pembagian**. Fokuskan tombol dengan Tab, lalu buka menu sistem dengan Enter, Spasi, atau panah; pilih dengan panah dan tutup dengan Escape. Dua dokumen terbuka digunakan jika tersedia. Jika hanya satu, menu menjelaskan bahwa salinan terpisah akan dibuka tanpa menyinkronkan perubahan. Setelah dibagi, **Dokumen kiri / kanan** atau **Dokumen atas / bawah** mengganti tiap panel; dokumen sebelumnya tetap terbuka. Tampilan Beranda, bantuan, dan presentasi menjelaskan mengapa pembagian tidak tersedia.
+
 **Seret tab ke tepi kanan jendela**: tab mengikuti sebagai salinan kecil yang melayang, petunjuk "Bagi di sini" muncul di dekat tepi, dan saat dilepas terbentuk dua panel berdampingan. Lepaskan di tepi bawah untuk dua panel bertumpuk. Menu klik kanan tab menawarkan hal yang sama dengan **Bagi ke Kanan** dan **Bagi ke Bawah**, dan **Batalkan Bagi** pada tab yang berada di panel.
 
 - Tab yang diseret masuk ke panel tempat Anda melepaskannya; panel lain mempertahankan dokumen yang baru saja Anda lihat.

@@ -72,7 +72,8 @@ import {
 } from '../../../slides/src/main/slides-main'
 import { rendererUrl, safeExternalUrl } from '@genoffice/electron-utils'
 import type { DocumentTabKind, OpenDocumentTab, TabKind, TabSummary } from '../shared/tabs-api'
-import { isSettledRect, tabStripHeight } from '../shared/tab-drag-geometry'
+import { isSettledRect } from '../shared/tab-drag-geometry'
+import { workspaceLayout, type WorkspacePanelLayout } from '../shared/workspace-layout'
 import type {
   SplitDropIntent,
   SplitOrientation,
@@ -230,6 +231,8 @@ export class TabManager {
   private spareSheetsTimer: ReturnType<typeof setTimeout> | null = null
   /** live two-pane split of this window (decision 0037); null = one visible document */
   private split: SplitViewState | null = null
+  /** Opt-in reservation; stays null until a verified shell AI host is attached. */
+  private workspacePanel: WorkspacePanelLayout | null = null
   /** the tab shown before the current one: the "other document" a split falls
    *  back to when the dropped tab was itself the visible one */
   private previousActiveId: string | null = null
@@ -336,12 +339,29 @@ export class TabManager {
 
   /** the layout space normal tab views live in: the window below the strip */
   private contentBounds(): Rectangle {
+    return this.documentBounds()
+  }
+
+  /** The same rectangle is used by views, divider limits and drag hints. */
+  documentBounds(
+    orientation: SplitOrientation | null = this.split?.orientation ?? null,
+  ): Rectangle {
     const { width, height } = this.shellWindow.getContentBounds()
-    // The strip is `zoom`ed by the interface scale, so its rendered height
-    // grows with it — positioning the view at the unscaled constant would
-    // paint the document underneath a taller tab strip.
-    const strip = tabStripHeight(this.uiScale())
-    return { x: 0, y: strip, width, height: Math.max(0, height - strip) }
+    return workspaceLayout(
+      { width, height, uiScale: this.uiScale() },
+      this.workspacePanel,
+      orientation,
+    ).documents
+  }
+
+  /**
+   * Reserve panel space without changing any document or saved split ratio.
+   * Before opting in, the host must deliver documentBounds() to the renderer's
+   * divider viewport too. No production host is attached during this stage.
+   */
+  setWorkspacePanel(panel: Readonly<WorkspacePanelLayout> | null): void {
+    this.workspacePanel = panel ? { ...panel } : null
+    this.layout()
   }
 
   /** the tab whose view covers the whole window right now (HTML fullscreen / slides show) */
@@ -436,7 +456,11 @@ export class TabManager {
       for (const t of this.tabs) {
         t.view?.setVisible(t.id === split.aTabId || t.id === split.bTabId)
       }
-      const rects = paneRects(bounds, split.orientation, split.ratio)
+      const rects = paneRects(
+        bounds,
+        split.orientation,
+        clampSplitRatio(split.ratio, bounds, split.orientation),
+      )
       this.tabById(split.aTabId)?.view?.setBounds(rects.a)
       this.tabById(split.bTabId)?.view?.setBounds(rects.b)
       return
@@ -1247,7 +1271,14 @@ export class TabManager {
     }
     const bounded =
       next.ratio > 0 && next.ratio < 1
-        ? { ...next, ratio: clampSplitRatio(next.ratio, this.contentBounds(), next.orientation) }
+        ? {
+            ...next,
+            ratio: clampSplitRatio(
+              next.ratio,
+              this.documentBounds(next.orientation),
+              next.orientation,
+            ),
+          }
         : next
     this.split = bounded
     if (activeTabId !== undefined && this.tabs.some((t) => t.id === activeTabId)) {

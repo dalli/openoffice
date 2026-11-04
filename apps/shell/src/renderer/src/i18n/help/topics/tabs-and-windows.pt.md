@@ -46,6 +46,8 @@ A guia Início mais à esquerda não pode ser fechada; para voltar de qualquer e
 
 ## Vista dividida: dois painéis
 
+**Dividir visualização** na barra de abas oferece **Lado a lado / Acima e abaixo / Desfazer divisão**. Use Tab para focar o botão e Enter, Espaço ou uma seta para abrir o menu do sistema; navegue com as setas e feche com Escape. Dois documentos abertos são usados quando disponíveis. Se houver apenas um, o menu avisa que abrirá uma cópia separada sem sincronizar as alterações. Depois, **Documento à esquerda / à direita** ou **Documento acima / abaixo** substitui cada painel; o documento substituído continua aberto. As telas inicial, de ajuda e de apresentação explicam por que a divisão está indisponível.
+
 **Arraste uma guia até ao bordo direito da janela**: a guia acompanha como uma pequena cópia flutuante, a indicação «Dividir aqui» aparece junto ao bordo e, ao largar, ficam dois painéis lado a lado. Se largar no bordo inferior, ficam dois painéis empilhados. O menu de contexto da guia oferece o mesmo com **Dividir à direita** e **Dividir abaixo**, e **Desfazer divisão** numa guia que está num painel.
 
 - A guia arrastada fica no painel onde a largou; o outro painel mantém o documento que estava a ver momentos antes.

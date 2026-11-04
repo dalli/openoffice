@@ -6,6 +6,7 @@ import { TEAR_OFF_SLACK, insertionIndexForX, isBeyondBand } from '../../shared/t
 import { notifyFilesChanged } from './file-events'
 import { productName } from '@genoffice/i18n'
 import { useI18n } from './locale'
+import { workspaceSplitText } from './i18n/strings-workspace-split'
 import iconDocx from './assets/file-docx.svg'
 import iconXlsx from './assets/file-xlsx.svg'
 import iconPptx from './assets/file-pptx.svg'
@@ -123,9 +124,19 @@ interface TabBarProps {
 export function TabBar({ split }: TabBarProps) {
   const { t, lang } = useI18n()
   const [tabs, setTabs] = useState<TabSummary[]>([])
+  const [splitMenuOpen, setSplitMenuOpen] = useState(false)
   // where a tab drag would split the window (main sends it while dragging)
   const [splitHint, setSplitHint] = useState<SplitHint | null>(null)
   const stripRef = useRef<HTMLDivElement>(null)
+  const openSplitMenu = (button: HTMLButtonElement): void => {
+    if (splitMenuOpen) return
+    const rect = button.getBoundingClientRect()
+    setSplitMenuOpen(true)
+    void window.aiOfficeTabs.showSplitMenu(Math.round(rect.left), Math.round(rect.bottom)).then(
+      () => setSplitMenuOpen(false),
+      () => setSplitMenuOpen(false),
+    )
+  }
 
   // Double-click a file tab to rename the underlying file inline (Home's row
   // rename, one tab over): the input prefills the base name, Enter/blur commits
@@ -605,6 +616,33 @@ export function TabBar({ split }: TabBarProps) {
           {t(splitHint.orientation === 'side' ? 'splitHintRight' : 'splitHintBottom')}
         </div>
       )}
+      <button
+        className="tab-split-btn"
+        title={workspaceSplitText(lang, 'splitView')}
+        aria-label={workspaceSplitText(lang, 'splitView')}
+        aria-haspopup="menu"
+        aria-expanded={splitMenuOpen}
+        onClick={(event) => openSplitMenu(event.currentTarget)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault()
+            openSplitMenu(event.currentTarget)
+          }
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+          <path
+            d={split?.orientation === 'stack' ? 'M3 12h18' : 'M12 4v16'}
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+        </svg>
+        <span>{workspaceSplitText(lang, 'splitView')}</span>
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      </button>
       <button
         className="tab-overflow-btn"
         title={t('tabList')}

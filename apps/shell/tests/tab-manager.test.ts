@@ -295,6 +295,86 @@ describe('initial state', () => {
   })
 })
 
+describe('workspace panel reservation', () => {
+  it('reserves the same shell area through tab switches and restores the full width on detach', () => {
+    const docsId = manager.openDocsTab()
+    const docs = lastCreatedView(createDocsView)
+    const htmlId = manager.openHtmlTab()
+    const html = lastCreatedView(createHtmlView)
+    const tabs = manager.list()
+    manager.setWorkspacePanel({ side: 'left', width: 300, open: true })
+    expect(html.setBounds).toHaveBeenLastCalledWith({ x: 300, y: 40, width: 500, height: 560 })
+    manager.activateTab(docsId)
+    expect(docs.setBounds).toHaveBeenLastCalledWith({ x: 300, y: 40, width: 500, height: 560 })
+    manager.setWorkspacePanel(null)
+    expect(docs.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 40, width: 800, height: 560 })
+    expect(manager.list().map((t) => t.id)).toEqual(tabs.map((t) => t.id))
+    expect(manager.list().find((t) => t.id === htmlId)).toBeDefined()
+    expect(docs.webContents.close).not.toHaveBeenCalled()
+    expect(html.webContents.close).not.toHaveBeenCalled()
+  })
+
+  it('keeps both native document views outside the AI region in either split orientation', () => {
+    const aId = manager.openDocsTab()
+    const a = lastCreatedView(createDocsView)
+    const bId = manager.openHtmlTab()
+    const b = lastCreatedView(createHtmlView)
+    for (const orientation of ['side', 'stack'] as const) {
+      manager.beginSplit(aId, bId, orientation, 0.5, 'b')
+      const split = manager.splitState()
+      manager.setWorkspacePanel({ side: 'right', width: 300, open: true })
+      for (const view of [a, b]) {
+        const bounds = view.setBounds.mock.lastCall![0]
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(500)
+        expect(bounds.y).toBeGreaterThanOrEqual(40)
+      }
+      expect(manager.splitState()).toEqual(split)
+      expect(manager.documentBounds()).toEqual({ x: 0, y: 40, width: 500, height: 560 })
+    }
+  })
+
+  it('lets presentation cover the AI area and restores the reservation afterwards', () => {
+    manager.openDocsTab()
+    const view = lastCreatedView(createDocsView)
+    manager.setWorkspacePanel({ side: 'right', width: 300, open: true })
+    manager.setContentBleed(view.webContents as never, true)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 800, height: 600 })
+    manager.setContentBleed(view.webContents as never, false)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 40, width: 500, height: 560 })
+  })
+
+  it('uses the next orientation when restoring a skewed split across the automatic rail threshold', () => {
+    shellWindow.getContentBounds = () => ({ x: 0, y: 0, width: 1024, height: 768 })
+    manager = new TabManager(shellWindow as never, onChanged, applyMenuFor, undefined, () => 1.5)
+    const aId = manager.openDocsTab()
+    const a = lastCreatedView(createDocsView)
+    const bId = manager.openHtmlTab()
+    manager.setWorkspacePanel({ side: 'right', width: 360, open: true })
+    expect(manager.documentBounds().width).toBe(484)
+    manager.beginSplit(aId, bId, 'side', 0.2, 'a')
+    expect(manager.documentBounds().width).toBe(964)
+    expect(a.setBounds.mock.lastCall![0].width).toBeGreaterThanOrEqual(240)
+    expect(manager.splitState()!.ratio).toBeCloseTo(240 / 958)
+  })
+
+  it('keeps the saved ratio while fitting each pane to its minimum after panel opening', () => {
+    shellWindow.getContentBounds = () => ({ x: 0, y: 0, width: 1280, height: 720 })
+    const aId = manager.openDocsTab()
+    const a = lastCreatedView(createDocsView)
+    const bId = manager.openHtmlTab()
+    const b = lastCreatedView(createHtmlView)
+    manager.beginSplit(aId, bId, 'side', 0.2, 'a')
+    const saved = manager.splitState()
+    manager.setWorkspacePanel({ side: 'right', width: 360, open: true })
+    expect(manager.splitState()).toEqual(saved)
+    expect(a.setBounds.mock.lastCall![0].width).toBeCloseTo(240)
+    expect(b.setBounds.mock.lastCall![0].x).toBeCloseTo(246)
+    manager.setWorkspacePanel(null)
+    expect(a.setBounds.mock.lastCall![0].width).toBeCloseTo((1280 - 6) * 0.2)
+    expect(manager.splitState()).toEqual(saved)
+  })
+})
+
 describe('opening tabs', () => {
   it('focuses the help tab already open instead of opening a second one', () => {
     // F1 is a toggle-shaped key in practice: press it, read something, press it

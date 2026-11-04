@@ -46,6 +46,8 @@ Der Start-Tab ganz links lässt sich nicht schließen; um aus einem beliebigen E
 
 ## Geteilte Ansicht: zwei Bereiche
 
+**Ansicht teilen** in der Tableiste bietet **Nebeneinander / Untereinander / Teilung aufheben**. Mit Tab den Knopf fokussieren und mit Eingabe, Leertaste oder Pfeiltaste das Systemmenü öffnen; Pfeile wählen aus, Escape schließt es. Wenn möglich werden zwei offene Dokumente verwendet. Bei nur einem Dokument erklärt das Menü vorher, dass eine separate Kopie ohne synchronisierte Änderungen geöffnet wird. Danach ersetzt **Linkes / Rechtes Dokument** oder **Oberes / Unteres Dokument** den jeweiligen Bereich; das ersetzte Dokument bleibt offen. Startseite, Hilfe und Präsentation zeigen den Grund für die fehlende Teilungsmöglichkeit.
+
 **Ziehen Sie einen Tab an den rechten Fensterrand**: Der Tab folgt als kleine schwebende Kopie, nahe dem Rand erscheint der Hinweis „Hier teilen“, und beim Loslassen entstehen zwei Bereiche nebeneinander. Lassen Sie ihn am unteren Rand los, entstehen zwei Bereiche übereinander. Das Kontextmenü des Tabs bietet dasselbe mit **Nach rechts teilen** und **Nach unten teilen** und bei einem Tab in einem Bereich zusätzlich **Teilung aufheben**.
 
 - Der gezogene Tab landet in dem Bereich, auf dem Sie ihn abgelegt haben; der andere Bereich behält das Dokument, das Sie gerade eben gesehen haben.

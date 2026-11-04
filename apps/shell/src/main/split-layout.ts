@@ -12,7 +12,7 @@ import {
   type SplitOrientation,
   type SplitViewState,
 } from '../shared/split-view-api'
-import { TAB_STRIP_HEIGHT, type Rect } from '../shared/tab-drag-geometry'
+import { pointInRect, TAB_STRIP_HEIGHT, type Rect } from '../shared/tab-drag-geometry'
 import type { TabKind } from '../shared/tabs-api'
 
 /** Share of the first pane (a) a new split starts with. */
@@ -94,10 +94,20 @@ export function splitDropZone(
   width: number,
   height: number,
 ): SplitOrientation | null {
+  return splitDropZoneInRect(x, y, {
+    x: 0,
+    y: TAB_STRIP_HEIGHT,
+    width,
+    height: Math.max(0, height - TAB_STRIP_HEIGHT),
+  })
+}
+
+/** Only the reserved document area accepts a split drop, never the AI panel. */
+export function splitDropZoneInRect(x: number, y: number, content: Rect): SplitOrientation | null {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-  if (y < TAB_STRIP_HEIGHT) return null
-  const fromRight = width - x
-  const fromBottom = height - y
+  if (!pointInRect(x, y, content)) return null
+  const fromRight = content.x + content.width - x
+  const fromBottom = content.y + content.height - y
   const rightHit = fromRight <= SPLIT_EDGE_ZONE_PX
   const bottomHit = fromBottom <= SPLIT_EDGE_ZONE_PX
   if (rightHit && bottomHit) return fromRight <= fromBottom ? 'side' : 'stack'

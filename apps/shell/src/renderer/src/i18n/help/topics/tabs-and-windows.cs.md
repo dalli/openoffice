@@ -46,6 +46,8 @@ Karta Domů, úplně vlevo, nelze zavřít; chcete-li se z libovolného editoru 
 
 ## Rozdělené zobrazení: dva panely
 
+**Rozdělit zobrazení** na liště karet nabízí **Vedle sebe / Nad sebou / Zrušit rozdělení**. Klávesou Tab zaměřte tlačítko a klávesou Enter, mezerníkem nebo šipkou otevřete systémovou nabídku; šipkami vybírejte a klávesou Escape ji zavřete. Pokud jsou k dispozici, použijí se dva otevřené dokumenty. U jednoho dokumentu nabídka předem vysvětluje, že otevře samostatnou kopii bez synchronizace změn. Po rozdělení změní **Levý / Pravý dokument** nebo **Horní / Dolní dokument** příslušný panel; předchozí dokument zůstane otevřený. Domovská obrazovka, nápověda a prezentace zobrazují důvod nedostupnosti rozdělení.
+
 **Přetáhněte kartu na pravý okraj okna**: karta se promění v malou plovoucí kopii, u okraje se objeví nápověda „Zde rozdělit” a po puštění vzniknou dva panely vedle sebe. Puštění na dolním okraji vytvoří dva panely nad sebou. Nabídka karty po kliknutí pravým tlačítkem nabízí totéž přes **Rozdělit vpravo** a **Rozdělit dolů**, a na kartě v panelu navíc **Zrušit rozdělení**.
 
 - Přetažená karta zůstane v panelu, kam jste ji pustili; druhý panel si ponechá dokument, který jste právě prohlíželi.
