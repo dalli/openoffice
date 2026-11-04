@@ -83,6 +83,8 @@ import {
 import type { AiPageSetupAccess } from './page-setup'
 import type { AiNotesAccess } from './note-ops'
 import { createDocsSkill } from './docs-skill'
+import { createDocsWorkspaceAdapter } from './workspace-adapter'
+import { hostWorkspaceEditor } from '@genoffice/agent-core/workspace-editor-host'
 import { MindMapCard } from './MindMapCard'
 import { insertPictureAtSelection } from '../editor/insert-picture'
 import {
@@ -1127,6 +1129,27 @@ export function AiPanel({
   }
 
   const loopRef = useRef<AgentLoop<ProseMirrorNode> | null>(null)
+  // This panel remounts on document replacement, but not on Save As.
+  const workspaceDocumentId = useRef(crypto.randomUUID())
+  useEffect(() => {
+    const port = window.aiOfficeWorkspaceEditor
+    if (!port) return
+    return hostWorkspaceEditor(
+      port,
+      createDocsWorkspaceAdapter({
+        getEditor: () => editorRef.current,
+        getDocumentId: () => workspaceDocumentId.current,
+        getNumIds: () => ({
+          bullet:
+            findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,
+          ordered:
+            findNumId(blocksRef.current, 'ordered') ?? numIdFallbackRef.current?.ordered ?? null,
+        }),
+        getTrack: () => (trackChangesRef.current ? { author: AI_REVISION_AUTHOR } : undefined),
+      }),
+      () => loopRef.current?.busy === true,
+    )
+  }, [])
   if (!loopRef.current) {
     const numIds = (): NumIds => ({
       bullet: findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,

@@ -1325,6 +1325,10 @@ export function patchTargets(name, file) {
  */
 export const pluginHooks = [
   {
+    file: 'src/plugin/host.ts',
+    needles: ['currentGeneration(): number', 'return this.deps.wasm.documentGeneration'],
+  },
+  {
     file: 'src/engine/cursor.ts',
     needles: [
       'hasSelection(): boolean',

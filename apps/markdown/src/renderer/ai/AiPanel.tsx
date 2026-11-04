@@ -74,6 +74,8 @@ import { clearAiHighlights } from '../editor/aiHighlight'
 import { setInactiveSelectionShown } from '../editor/inactiveSelection'
 import { uiOp } from '../editor/ops'
 import { createMarkdownSkill, MARKDOWN_RULES } from './markdown-skill'
+import { createMarkdownWorkspaceAdapter } from './workspace-adapter'
+import { hostWorkspaceEditor } from '@genoffice/agent-core/workspace-editor-host'
 import { MindMapCard } from './MindMapCard'
 import { mindMapToMermaid } from './mind-map'
 import {
@@ -217,6 +219,10 @@ export interface AiPreset {
 
 export interface MarkdownAiDeps {
   getEditor(): Editor | null
+  /** Changes on a file reload, including reusing this panel and editor for the same path. */
+  getDocumentId?(): string
+  /** Source buffers are not represented by the mounted block editor. */
+  isSourceMode?(): boolean
   /** inner YAML of the properties block, read synchronously (write-then-read within one run) */
   getFrontmatter(): string
   /** replace the properties block; empty string removes it */
@@ -814,6 +820,25 @@ export function AiPanel({
       const editor = depsRef.current.getEditor()
       if (editor) clearAiHighlights(editor)
     }
+  }, [])
+
+  const workspaceDocumentId = useRef(crypto.randomUUID())
+  useEffect(() => {
+    const port = window.aiOfficeWorkspaceEditor
+    if (!port) return
+    return hostWorkspaceEditor(
+      port,
+      createMarkdownWorkspaceAdapter({
+        getEditor: () => depsRef.current.getEditor(),
+        getDocumentId: () => depsRef.current.getDocumentId?.() ?? workspaceDocumentId.current,
+        isSourceMode: () => depsRef.current.isSourceMode?.() ?? true,
+        frontmatter: {
+          read: () => depsRef.current.getFrontmatter(),
+          write: (inner) => depsRef.current.setFrontmatter(inner),
+        },
+      }),
+      () => loopRef.current?.busy === true,
+    )
   }, [])
 
   /** bumped whenever a project chat opens: a per-document load still in flight is dropped */

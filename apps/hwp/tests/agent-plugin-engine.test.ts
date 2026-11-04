@@ -10,6 +10,9 @@ import { dirname, join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import init, { HwpDocument } from '@rhwp/core'
 import { agentPlugin, type AgentPluginHost } from '../studio-plugin/agent-plugin.mjs'
+import type { AgentBridge } from '../src/renderer/ai/agent-bridge'
+import { createHwpWorkspaceAdapter } from '../src/renderer/ai/workspace-adapter'
+import { createHwpSkill, type HwpChange } from '../src/renderer/ai/hwp-skill'
 
 const require = createRequire(import.meta.url)
 
@@ -25,6 +28,7 @@ const GUIDE = '이곳을 마우스로 누르고 내용을 입력하세요.'
  *   제목 / 첫째 문단입니다. / 둘째 문단입니다. / [2×2 table: 구분 내용 대상 업체] / 끝 문단입니다.
  */
 function openEditor(options: { fields?: boolean; endsWithTable?: boolean } = {}) {
+  let generation = 1
   let doc = HwpDocument.createEmpty()
   doc.createBlankDocument()
   // the empty fourth paragraph is where the table goes
@@ -58,6 +62,7 @@ function openEditor(options: { fields?: boolean; endsWithTable?: boolean } = {})
   const listeners: (() => void)[] = []
   const emit = () => listeners.forEach((listener) => listener())
   const host = {
+    currentGeneration: () => generation,
     read: (fn: (d: never) => unknown) => fn(doc as never),
     transaction: (_label: string, fn: (tx: never) => unknown) => {
       const before = doc.exportHwp()
@@ -100,6 +105,17 @@ function openEditor(options: { fields?: boolean; endsWithTable?: boolean } = {})
     steps: () => history.length,
     /** the engine's document, for what the plugin does not report */
     doc: () => doc,
+    reload: () => {
+      doc = new HwpDocument(doc.exportHwp())
+      generation += 1
+      emit()
+    },
+    loadOther: (text: string) => {
+      doc = HwpDocument.createEmpty()
+      doc.createBlankDocument()
+      doc.insertText(0, 0, 0, text)
+      generation += 1
+    },
     /** character formatting at a place in a body paragraph */
     chars: (para: number, offset: number) =>
       JSON.parse(doc.getCharPropertiesAt(0, para, offset)) as Record<string, unknown>,
@@ -135,6 +151,120 @@ describe('the document the tests work on', () => {
     const editor = openEditor()
     expect(editor.lines()).toEqual(ORIGINAL)
     expect(editor.tables()).toBe(1)
+  })
+
+  it('guards workspace mutation at the actual engine operation and preserves the original undo step', () => {
+    const editor = openEditor()
+    const initial = editor.plugin.workspaceSnapshot()
+    expect(initial.text).toContain('업체')
+    const changed = editor.plugin.workspaceInvoke(initial, 'replaceText', [
+      '첫째 문단',
+      '고친 첫 문단',
+    ])
+    expect(changed).toMatchObject({ ok: true, foreignChanges: 0, value: { ok: true } })
+    expect(editor.steps()).toBe(1)
+    const bytes = editor.doc().exportHwp()
+    expect(editor.plugin.workspaceInvoke(initial, 'replaceText', ['둘째 문단', 'wrong'])).toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    expect(editor.doc().exportHwp()).toEqual(bytes)
+    expect(editor.steps()).toBe(1)
+    expect(editor.plugin.undo(1, initial.foreignChanges)).toMatchObject({ ok: true, undone: 1 })
+    expect(editor.lines()).toEqual(ORIGINAL)
+  })
+
+  it('does not reuse workspace identity when the same document bytes are loaded again', () => {
+    const editor = openEditor()
+    const initial = editor.plugin.workspaceSnapshot()
+    editor.reload()
+    expect(editor.plugin.workspaceSnapshot().instance).not.toBe(initial.instance)
+    expect(editor.plugin.workspaceInvoke(initial, 'replaceText', ['첫째 문단', 'wrong'])).toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    expect(editor.lines()).toEqual(ORIGINAL)
+    expect(editor.steps()).toBe(0)
+  })
+
+  it('does not return cached text from a different document after the host generation changes', () => {
+    const editor = openEditor()
+    expect(editor.plugin.workspaceSnapshot().text).toContain('첫째 문단')
+    editor.loadOther('replacement document')
+    expect(editor.plugin.workspaceSnapshot().text.trim()).toBe('replacement document')
+    expect(editor.steps()).toBe(0)
+  })
+
+  it('reads frozen range text from the live engine without moving selection or writing the file', () => {
+    const editor = openEditor()
+    const initial = editor.plugin.workspaceSnapshot()
+    const segment = {
+      sec: 0,
+      para: 1,
+      offset: 0,
+      length: '첫째 문단입니다.'.length,
+      text: '첫째 문단입니다.',
+    }
+    expect(
+      editor.plugin.workspaceInvoke(initial, 'readSelectionSnapshot', [[segment]]),
+    ).toMatchObject({
+      ok: true,
+      revision: initial.revision,
+      value: segment.text,
+    })
+    expect(editor.steps()).toBe(0)
+    expect(editor.lines()).toEqual(ORIGINAL)
+  })
+
+  it('matches the original skill editing, change records, saved content and undo through the workspace adapter', async () => {
+    const original = openEditor()
+    const workspace = openEditor()
+    const bridge = (editor: ReturnType<typeof openEditor>): AgentBridge =>
+      Object.fromEntries(
+        Object.entries(editor.plugin).map(([method, invoke]) => [
+          method,
+          async (...args: unknown[]) => (invoke as (...values: unknown[]) => unknown)(...args),
+        ]),
+      ) as AgentBridge
+    const originalChanges: HwpChange[] = []
+    const workspaceChanges: HwpChange[] = []
+    const direct = createHwpSkill({
+      bridge: bridge(original),
+      label: (key) => key,
+      onChange: (change) => originalChanges.push(change),
+      confirmMemoRemoval: async () => false,
+    })
+    const adapter = createHwpWorkspaceAdapter({
+      bridge: bridge(workspace),
+      label: (key) => key,
+      onChange: (change) => workspaceChanges.push(change),
+      confirmMemoRemoval: async () => false,
+    })
+    const session = await adapter.prepare({
+      runId: 'comparison',
+      mode: 'edit',
+      state: await adapter.capture(),
+    })
+    await direct.refreshContext()
+    const call = {
+      id: 'same-call',
+      name: 'replace_text',
+      input: { find: '업체', replace: '저장 전 표식 자료' },
+    }
+    const expected = await direct.skill.executeTool(call)
+    const actual = await session.execute(call)
+    expect(actual.result).toEqual(expected)
+    expect(workspaceChanges).toEqual(originalChanges)
+    expect(workspace.lines()).toEqual(original.lines())
+    expect(workspace.reopened()).toEqual(original.reopened())
+    expect(workspace.steps()).toBe(1)
+    expect(original.steps()).toBe(1)
+    expect(workspace.plugin.undo(1, 0)).toMatchObject({ ok: true })
+    expect(original.plugin.undo(1, 0)).toMatchObject({ ok: true })
+    expect(workspace.lines()).toEqual(ORIGINAL)
+    expect(original.lines()).toEqual(ORIGINAL)
+    session.release()
+    adapter.dispose()
   })
 })
 

@@ -89,6 +89,8 @@ import {
   type SelectionScope,
 } from './selection-scope'
 import { createHwpSkill, type HwpChange } from './hwp-skill'
+import { createHwpWorkspaceAdapter } from './workspace-adapter'
+import { hostWorkspaceEditor } from '@genoffice/agent-core/workspace-editor-host'
 import { MemoApprovalGate, memoApprovalPreview } from './memo-approval'
 import { useSubscriptionConnection } from './subscription-client'
 import { createElectronTransport } from './transport'
@@ -869,6 +871,34 @@ export function AiPanel({
   }, [])
 
   useEffect(() => memoGateRef.current!.subscribe(setMemoApproval), [])
+
+  useEffect(() => {
+    const port = window.aiOfficeWorkspaceEditor
+    if (!port) return
+    return hostWorkspaceEditor(
+      port,
+      createHwpWorkspaceAdapter({
+        bridge: new Proxy({} as AgentBridge, {
+          get: (_target, method: keyof AgentBridge) => bridgeRef.current[method],
+        }),
+        label: tGlobal,
+        onChange: (change) => {
+          if (change.place) void bridgeRef.current.reveal(change.place).catch(() => {})
+        },
+        confirmMemoRemoval: async (refusal, signal) => {
+          const cancel = () => memoGateRef.current!.cancel()
+          signal?.addEventListener('abort', cancel, { once: true })
+          try {
+            if (signal?.aborted) return false
+            return await memoGateRef.current!.ask(refusal)
+          } finally {
+            signal?.removeEventListener('abort', cancel)
+          }
+        },
+      }),
+      () => loopRef.current?.busy === true,
+    )
+  }, [])
 
   useEffect(() => {
     if (stickToBottomRef.current) {

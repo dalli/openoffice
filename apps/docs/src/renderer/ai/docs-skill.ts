@@ -8,6 +8,7 @@ import {
   getSelectionScope,
   type AiTrack,
   type NumIds,
+  type SelectionScope,
 } from './protocol'
 import type { AiDocWriter } from './doc-writer'
 import type { AiPageSetupAccess } from './page-setup'
@@ -55,6 +56,8 @@ export function createDocsSkill(
   mediaAnalysisAvailable?: () => boolean,
   /** the files attached to this chat, so insert_image can take one the user made elsewhere */
   getAttachments?: () => AiAttachmentAccess | undefined,
+  /** Optional editor-owned snapshot for a panel hosted outside this document view. */
+  getSelection?: () => SelectionScope,
 ): AgentSkill {
   // Selection frozen per run: tools act on the range the prompt described,
   // not on wherever the user's live selection has wandered mid-run. The doc
@@ -99,7 +102,7 @@ export function createDocsSkill(
     buildContext: () => {
       const editor = getEditor()
       markDocSeen(editor) // the context the model receives is the freshness baseline for index-addressed writes
-      frozen = { scope: getSelectionScope(editor), doc: editor.state.doc }
+      frozen = { scope: getSelection?.() ?? getSelectionScope(editor), doc: editor.state.doc }
       return buildDocContext(
         editor,
         frozen.scope,
@@ -108,9 +111,11 @@ export function createDocsSkill(
         getPageSetup?.()?.list(),
       )
     },
-    executeTool: (call, signal) =>
-      executeTool(
-        getEditor(),
+    executeTool: (call, signal) => {
+      const editor = getEditor()
+      if (getSelection) frozen = { scope: getSelection(), doc: editor.state.doc }
+      return executeTool(
+        editor,
         call,
         getNumIds(),
         getTrack?.(),
@@ -123,6 +128,7 @@ export function createDocsSkill(
         getExtras?.(),
         getNotes?.(),
         getAttachments?.(),
-      ),
+      )
+    },
   }
 }

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { workspaceEditorPort } from '@genoffice/agent-core/workspace-editor-protocol'
 import { driveAiBridge } from '@genoffice/electron-utils/drive-ai-bridge'
 import { mcpToolsBridge } from '@genoffice/electron-utils/mcp-tools-bridge'
 import { outboundBridge } from '@genoffice/electron-utils/outbound-bridge'
@@ -386,6 +387,7 @@ const subscriptionApi: SubscriptionApi = {
 }
 
 contextBridge.exposeInMainWorld('desktop', api)
+contextBridge.exposeInMainWorld('aiOfficeWorkspaceEditor', workspaceEditorPort(ipcRenderer))
 // Google Drive for this editor's AI: search and read only (decision 0033)
 contextBridge.exposeInMainWorld('aiOfficeDriveAi', driveAiBridge())
 contextBridge.exposeInMainWorld('aiOfficeOutbound', outboundBridge())

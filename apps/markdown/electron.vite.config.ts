@@ -29,7 +29,11 @@ export default defineConfig({
   },
   preload: {
     // same bundling requirement as main (see comment above)
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/i18n', '@genoffice/electron-utils', '@genoffice/agent-core'],
+      }),
+    ],
   },
   renderer: {
     plugins: [react()],

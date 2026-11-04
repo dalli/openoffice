@@ -204,8 +204,11 @@ export interface SelectionScope {
   to?: number
 }
 
-export function getSelectionScope(editor: Editor): SelectionScope {
-  const { from, to, empty } = editor.state.selection
+export function getSelectionScope(
+  editor: Editor,
+  selection: { from: number; to: number; empty: boolean } = editor.state.selection,
+): SelectionScope {
+  const { from, to, empty } = selection
   const doc = editor.state.doc
   let startIndex = -1
   let endIndex = -1

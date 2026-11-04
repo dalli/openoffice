@@ -17,6 +17,56 @@ import { installDialogTheme } from './dialog-theme.mjs'
 
 export const AGENT_PLUGIN_ID = 'ieum-agent'
 
+/** Local document operations only; workspace routing never exposes arbitrary plugin methods. */
+const WORKSPACE_READ_METHODS = new Set([
+  'foreignChanges',
+  'readText',
+  'findText',
+  'listTables',
+  'readTable',
+  'listFields',
+  'listNotes',
+  'noteSettings',
+  'pageSetup',
+  'formatting',
+  'listStyles',
+  'readStyle',
+  'listMemos',
+  'selection',
+  'readSelectionSnapshot',
+])
+const WORKSPACE_WRITE_METHODS = new Set([
+  'replaceText',
+  'replaceAllText',
+  'insertParagraphs',
+  'deleteParagraph',
+  'insertTable',
+  'formatText',
+  'replaceFont',
+  'formatParagraph',
+  'fillCells',
+  'checkBoxes',
+  'addTableLines',
+  'removeTableLines',
+  'deleteTable',
+  'replaceSelection',
+  'formatSelection',
+  'fillField',
+  'insertToc',
+  'refreshToc',
+  'insertNote',
+  'editNote',
+  'deleteNote',
+  'setNoteSettings',
+  'setPageSetup',
+  'formatLook',
+  'formatCells',
+  'mergeCells',
+  'splitCell',
+  'createStyle',
+  'editStyle',
+])
+
 /** Matches listed back to the caller when a search is ambiguous. */
 const MAX_LISTED_MATCHES = 20
 /** Text runs one replaceFont call changes; beyond this it says it stopped early. */
@@ -4023,6 +4073,23 @@ export const agentPlugin = {
     // the panel takes back a run only while this has not moved since the run ended, because
     // the editor's history is one stack and anything on top of the run would be undone first
     let foreign = 0
+    let workspaceRevision = 0
+    const workspaceInstanceSeed =
+      globalThis.crypto?.randomUUID?.() ??
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    let workspaceGeneration = null
+    const workspaceInstance = () => {
+      const generation = host.currentGeneration?.()
+      if (!Number.isSafeInteger(generation) || generation < 0) {
+        throw fail('DOCUMENT_RELEASED', 'workspace document generation is unavailable')
+      }
+      if (workspaceGeneration !== generation) {
+        workspaceGeneration = generation
+        text = null
+        pictures = null
+      }
+      return `${workspaceInstanceSeed}:${generation}`
+    }
     let own = false
     // the text is read for every request; it only changes when the document does
     let text = null
@@ -4430,6 +4497,7 @@ export const agentPlugin = {
     }
 
     host.events.on('document-changed', () => {
+      workspaceRevision += 1
       text = null
       pictures = null
       if (!own) {
@@ -5005,10 +5073,57 @@ export const agentPlugin = {
     const api = {
       foreignChanges: () => foreign,
 
+      /** Version and selection only: freshness checks do not copy a whole document over the bridge. */
+      workspaceState: guarded(() => {
+        host.read(() => true)
+        return {
+          instance: workspaceInstance(),
+          revision: String(workspaceRevision),
+          foreignChanges: foreign,
+          masking: 'unsupported',
+          selection: api.selection(),
+        }
+      }),
+
+      /** Current unsaved state, read synchronously inside the editor's own realm. */
+      workspaceSnapshot: guarded(() => ({ ...api.workspaceState(), text: api.readText() })),
+
+      /** Check freshness in the same synchronous task as the existing document operation. */
+      workspaceInvoke: guarded((expected, method, args) => {
+        if (
+          !expected ||
+          expected.instance !== workspaceInstance() ||
+          expected.revision !== String(workspaceRevision)
+        )
+          return { ok: false, reason: 'changed' }
+        if (
+          (!WORKSPACE_READ_METHODS.has(method) && !WORKSPACE_WRITE_METHODS.has(method)) ||
+          !Array.isArray(args)
+        )
+          return { ok: false, reason: 'unsupported-method' }
+        const value = api[method](...args)
+        return {
+          ok: true,
+          instance: workspaceInstance(),
+          revision: String(workspaceRevision),
+          foreignChanges: foreign,
+          value,
+        }
+      }),
+
       /** The whole document as plain text, table cells included, in reading order. */
       readText: guarded(() => {
         text ??= host.read(textOf)
         return text
+      }),
+
+      /** Read a captured range after focus left the editor, without using its live caret. */
+      readSelectionSnapshot: guarded((segments) => {
+        checkSegments(segments)
+        if (!host.read((doc) => segmentsStand(doc, segments))) {
+          throw fail('CHANGED', 'the captured selection changed')
+        }
+        return segments.map((segment) => segment.text).join('\n')
       }),
 
       /** The pictures of the document, in reading order, with the words beside each one. */

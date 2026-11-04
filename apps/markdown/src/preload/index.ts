@@ -1,5 +1,6 @@
 import type { AiPanelPrefs } from '@genoffice/ui'
 import { contextBridge, ipcRenderer } from 'electron'
+import { workspaceEditorPort } from '@genoffice/agent-core/workspace-editor-protocol'
 import { driveAiBridge } from '@genoffice/electron-utils/drive-ai-bridge'
 import { mcpToolsBridge } from '@genoffice/electron-utils/mcp-tools-bridge'
 import { outboundBridge } from '@genoffice/electron-utils/outbound-bridge'
@@ -263,6 +264,7 @@ const projectApi: Pick<ProjectApi, 'resolveChat' | 'appendChat' | 'loadChat' | '
 }
 
 contextBridge.exposeInMainWorld('markdownApi', api)
+contextBridge.exposeInMainWorld('aiOfficeWorkspaceEditor', workspaceEditorPort(ipcRenderer))
 // The split-pane role and focus calls the shell drives this pane with
 contextBridge.exposeInMainWorld('aiOfficeSplit', splitPaneBridge(ipcRenderer))
 // Google Drive for this editor's AI: search and read only (decision 0033)

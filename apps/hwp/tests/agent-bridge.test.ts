@@ -53,4 +53,23 @@ describe('the bridge to the plugin inside the editor', () => {
     expect(first.plugins.load).toHaveBeenCalledTimes(1)
     expect(second.plugins.load).toHaveBeenCalledTimes(1)
   })
+
+  it('does not invoke an old editor after it changed while the plugin was loading', async () => {
+    let finish!: () => void
+    const first = fakeEditor(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const second = fakeEditor()
+    let current: AgentBridgeEditor | null = first.editor
+    const bridge = createAgentBridge(() => current)
+    const pending = bridge.readText()
+    current = second.editor
+    finish()
+    await expect(pending).rejects.toThrow('editor changed')
+    expect(first.plugins.invoke).not.toHaveBeenCalled()
+    expect(second.plugins.invoke).not.toHaveBeenCalled()
+  })
 })

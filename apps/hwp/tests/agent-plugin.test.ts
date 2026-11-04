@@ -92,6 +92,7 @@ function fakeEditor(
   }
 
   const host = {
+    currentGeneration: () => 1,
     read: (fn: (d: never) => unknown) => fn(doc as never),
     transaction: (_label: string, fn: (tx: never) => unknown) => {
       const before = copy()
@@ -130,10 +131,89 @@ function fakeEditor(
       emit()
     },
     steps: () => history.length,
+    disableWorkspaceGeneration: () => {
+      delete host.currentGeneration
+    },
   }
 }
 
 describe('reading', () => {
+  it('fails closed when an older plugin host cannot identify document replacements', () => {
+    const editor = fakeEditor(['local material'])
+    editor.disableWorkspaceGeneration()
+    expect(() => editor.plugin.workspaceSnapshot()).toThrow(
+      'workspace document generation is unavailable',
+    )
+    expect(editor.text()).toBe('local material')
+    expect(editor.steps()).toBe(0)
+  })
+  it('snapshots current unsaved text with instance and complete revision, including plugin writes', () => {
+    const editor = fakeEditor(['local unsaved material'])
+    const before = editor.plugin.workspaceSnapshot()
+    expect(before).toMatchObject({
+      text: 'local unsaved material',
+      masking: 'unsupported',
+      revision: '0',
+    })
+    expect(before.instance).toBeTruthy()
+    const changed = editor.plugin.workspaceInvoke(before, 'replaceText', [
+      'material',
+      'updated material',
+    ])
+    expect(changed).toMatchObject({
+      ok: true,
+      revision: '1',
+      foreignChanges: 0,
+      value: { ok: true },
+    })
+    expect(editor.plugin.workspaceSnapshot().text).toBe('local unsaved updated material')
+    expect(editor.plugin.workspaceInvoke(before, 'replaceText', ['local', 'wrong'])).toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    editor.userTypes(0, ' manual')
+    expect(editor.plugin.workspaceSnapshot()).toMatchObject({ revision: '2', foreignChanges: 1 })
+  })
+
+  it('rejects a stale or replaced workspace instance immediately before mutation', () => {
+    const editor = fakeEditor(['same words'])
+    const other = fakeEditor(['same words'])
+    const before = editor.plugin.workspaceSnapshot()
+    expect(other.plugin.workspaceInvoke(before, 'replaceText', ['same', 'wrong'])).toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    editor.userTypes(0, ' user edit')
+    expect(editor.plugin.workspaceInvoke(before, 'replaceText', ['same', 'wrong'])).toEqual({
+      ok: false,
+      reason: 'changed',
+    })
+    expect(editor.text()).toBe('same words user edit')
+    expect(other.text()).toBe('same words')
+  })
+
+  it('does not expose media, save, undo or arbitrary methods through workspace invocation', () => {
+    const editor = fakeEditor(['safe'])
+    const before = editor.plugin.workspaceSnapshot()
+    for (const method of [
+      'readPicture',
+      'insertPicture',
+      'undo',
+      'installFileMenu',
+      'workspaceInvoke',
+      'constructor',
+      '__proto__',
+      'save',
+    ]) {
+      expect(editor.plugin.workspaceInvoke(before, method, [])).toEqual({
+        ok: false,
+        reason: 'unsupported-method',
+      })
+    }
+    expect(editor.text()).toBe('safe')
+    expect(editor.steps()).toBe(0)
+  })
+
   it('returns the document text and where a piece of it occurs', () => {
     const { plugin } = fakeEditor(
       ['구매대행 계약서', '을은 구매대행 업무를 한다'],

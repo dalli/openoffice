@@ -15,6 +15,7 @@ import {
   type MdOp,
 } from '../editor/ops'
 import { t } from '../i18n/locale'
+import { frontmatterHasPrivateMarkup } from './frontmatter-model'
 import { MIND_MAP_LIMITS, MIND_MAP_TOOL, parseMindMapTree } from './mind-map'
 import {
   DraftLanding,
@@ -471,6 +472,12 @@ export function executeTool(
     case 'read_frontmatter': {
       if (!fm) return fail('frontmatter is not available', t('aiToolReadFm'))
       const inner = fm.read()
+      if (frontmatterHasPrivateMarkup(inner)) {
+        return fail(
+          'frontmatter contains private markup and cannot be read safely',
+          t('aiToolReadFm'),
+        )
+      }
       return {
         output: inner || '(the document has no frontmatter)',
         mutated: false,

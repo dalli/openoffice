@@ -9,7 +9,11 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@genoffice/i18n', '@genoffice/electron-utils'] })],
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@genoffice/i18n', '@genoffice/electron-utils', '@genoffice/agent-core'],
+      }),
+    ],
   },
   renderer: {
     plugins: [react(), rhwpPatches('sdk-scheme')],

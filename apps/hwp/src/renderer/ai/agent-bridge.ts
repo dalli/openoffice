@@ -17,6 +17,10 @@ export type AgentBridgeEditor = Pick<RhwpEditor, 'plugins'>
 
 const METHODS = [
   'foreignChanges',
+  'workspaceState',
+  'workspaceSnapshot',
+  'workspaceInvoke',
+  'readSelectionSnapshot',
   'readText',
   'listPictures',
   'readPicture',
@@ -96,6 +100,8 @@ export function createAgentBridge(getEditor: () => AgentBridgeEditor | null): Ag
       })
     }
     await loaded.ready
+    // A document can close or replace its editor while plugin loading was pending.
+    if (getEditor() !== editor) throw new Error('the editor changed while the plugin was loading')
     return editor.plugins.invoke(AGENT_PLUGIN_ID, method, args)
   }
 

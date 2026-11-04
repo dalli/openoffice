@@ -8,6 +8,7 @@ Markdown 에디터다. 일반 `.md` 파일 위에서 TipTap 블록 편집기를 
 - 메인 프로세스(`src/main/markdown-main.ts`와 주변): 열기·저장, 문서가 소유한 자산 폴더 관리(`asset-lifecycle.ts`), 이미지 호스트 업로드(`image-host.ts`), 이미지 내보내기 세션(`image-export.ts`), PDF 인쇄(`print-pdf.ts`), 변환 임시 세션(`conversion-lifecycle.ts`), ODT 내보내기(`odt-export.ts`), PDF 편집기의 "노트에 넣기"를 받는 대기열(`note-append.ts`, 화면 쪽은 `src/renderer/note-append.ts`).
 - 공유 계약 `src/shared/`: IPC(`ipc.ts`의 `MARKDOWN_CHANNELS`), 열기 방식 판정(`text-mode.ts`), 원문 형식 보존(`source-text.ts`).
 - Markdown의 AI: 패널(`src/renderer/ai/AiPanel.tsx`), skill과 도구(`markdown-skill.ts`, `tools.ts`, `doc-writer.ts`, `search-skill.ts`), 막힌 실행과 이미지 도구 판정(`ai-connection.ts`), 연결 상태(`subscription-client.ts`), 가림 표시(`src/renderer/editor/redact.ts`).
+- 공용 작업 화면용 문서 어댑터(`src/renderer/ai/workspace-adapter.ts`): 기존 skill의 문서 맥락·블록·frontmatter 읽기와 `apply_ops`만 연결하는 렌더러 경계다. 전용 preload와 렌더러 호스트에 연결했으며 공용 패널이나 모델 실행에는 아직 연결하지 않았다. 원문 모드·편집기 교체·문서/메타데이터 변경·중단을 검사하고, 요청 당시의 실제 ProseMirror 선택을 보존한다. 잠깐 선택을 복원할 때 사람의 보이는 커서와 입력 서식은 원래 자리로 돌려놓는다. 이미지·긴 글 작성기·마인드맵·저장·네트워크 도구는 내놓지 않는다.
 
 ## 맡지 않는 것 (경계)
 
@@ -22,6 +23,7 @@ Markdown 에디터다. 일반 `.md` 파일 위에서 TipTap 블록 편집기를 
 - 원문 편집에서는 BOM, 줄 끝 형식, 끝 개행이 바이트 그대로 살아남아야 한다(`source-text.ts`). 일반 텍스트와 JSON은 블록 편집기로 열지 않는다(`text-mode.ts`). 블록 편집기는 `---`, `*x*`, `1.`을 다르게 해석하고 줄 끝을 정규화해 고치지 않은 파일을 다시 써 버린다.
 - 문서 옆에 두는 파일의 이름을 바꾸지 않는다. 문서와 같은 폴더의 `assets/` 안에 앱이 소유한 파일 목록 `.genoffice-assets.json`(`ASSET_MANIFEST_FILENAME`)이 있고, 이것으로 "앱이 넣은 이미지"와 "사용자가 넣은 파일"을 구분한다. 이름을 바꾸면 기존 문서의 자산을 더는 앱의 것으로 알아보지 못한다. 앱이 넣지 않은 파일은 지우지 않는다.
 - 가려진 범위는 실제 글자 위의 표시다. 문서와 디스크의 파일은 원래 글자를 그대로 갖고, 모델에게 직렬화될 때만 `{{label}}`로 나간다. 변환은 Markdown 직렬화 전에 JSON에서 한다(`redactJson`). 텍스트 노드에 걸린 mark는 직렬화기가 mark의 렌더 함수로 보내지 않아, 직렬화 뒤에 바꾸려 하면 아무 일도 일어나지 않는다. `redactJson`은 throw하지 않고 모르는 노드는 통과시킨다. 모델의 편집은 표식이 쪼개지지 않았는지 검사한 뒤에만 받아들인다.
+- frontmatter는 편집기 본문 밖의 원문 YAML이다. `data-redaction`이 들어 있으면 안전하게 가릴 수 있다고 간주하지 않는다. 기존 `read_frontmatter`는 내용을 내주지 않고 실패하며, 작업 화면 어댑터도 그 메타데이터가 든 스냅숏·준비와 그런 메타데이터를 쓰는 연산을 거절한다(`ai/frontmatter-model.ts`). 원문 파일이나 YAML을 자동으로 고치지 않는다.
 - 이 모듈이 갖는 AI 채널은 `markdown:ai-generate-image` 하나다. 호출할 때 `{ path: 'screen', statuses: sharedSubscriptionStatuses() }`를 넘기고 로컬 경로는 문서 폴더와 붙여 넣기 임시 폴더로 제한한다. 가용성은 `AI_TOOL_CAPABILITIES_CHANNEL`(문서 에디터의 메인이 등록한 채널과 같은 이름이어야 한다)로 묻고, 답이 없으면 이미지 도구를 내놓지 않는다.
 - 구독 API의 채널 이름과 판독 함수는 `@genoffice/ai-provider/browser`의 것을 쓰고 사본을 만들지 않는다. 보내기 판단은 `useAiSendGate`만 쓴다. 다른 제공자로 저절로 넘어가는 코드를 넣지 않는다.
 - 이미지 호스트의 자격 증명은 메인 프로세스에만 둔다. 업로드는 메인에서 하고 로컬 `assets/` 사본을 대체 경로로 유지한다.
@@ -54,5 +56,6 @@ Markdown 에디터다. 일반 `.md` 파일 위에서 TipTap 블록 편집기를 
 - 노트에 넣기(`tests/note-append.test.ts`, `tests/note-append-editor.test.ts`): 그 노트를 보여 주는 탭만 한 번 가져가는지, 문서 끝에 넣고 바뀜이 되는지, 파일은 그대로인지.
 - Save As › PDF(`tests/save-as-pdf.test.ts`, `tests/save-as-pdf-wiring.test.ts`): 고른 `.pdf`가 PDF로만 쓰이고 Markdown 원본·경로가 그대로인지, 다음 저장이 계속 `.md`로 가는지, 화면에 그릴 문서가 없으면 PDF 선택지를 내놓지 않는지.
 - AI 배선: 가용성 답이 없을 때 이미지 도구가 빠지는지, 막힌 실행 판정, 핸들러가 없을 때의 연결 상태. 이 모듈의 테스트는 제공자를 부르지 않는다.
+- 작업 화면 어댑터(`tests/workspace-adapter.test.ts`)는 실제 합성 편집기로 기존 skill과 같은 입력의 결과·실행 취소·중첩 목록·가리기를 비교한다. 선택을 다른 곳으로 옮긴 뒤의 요청, 본문/frontmatter 변경, 편집기/문서 교체, 원문 모드, 읽기 전용, 선택 복원 중의 취소도 검사한다. `tests/frontmatter-model-safety.test.ts`는 기존 도구가 가린 표식이 든 YAML 원문을 반환하지 않는지 별도로 지킨다.
 - Windows에서 `tests/image-export.test.ts`의 "disposes only the closing renderer's unfinished export" 한 건은 변경과 무관하게 실패한다(경로가 `/`로 시작하는지 비교한다).
 - `node_modules`를 다른 체크아웃에 연결한 git worktree에서는 `ai-tools`·`slash-and-image` 테스트가 katex 모듈 해석 오류로 실패한다. 원래 체크아웃에서는 통과한다.

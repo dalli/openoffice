@@ -11,6 +11,8 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 - 문서 에디터의 AI 패널과 skill(`src/renderer/ai/`): `AiPanel.tsx`, `docs-skill.ts`, 도구(`tools.ts`, `*-ops.ts`), 편집 대기 카드(`edit-queue.ts`), 전송(`transport.ts`). AI 창 첨부 칸에는 로컬 파일(끌어다 놓기·`aiAttachTitle`)과 "Google 드라이브에서 첨부"(`DriveAttachButton`), "이음오피스 문서에서 첨부"(`DocAttachButton`, 결정 0035)가 함께 있다. 입력란의 `@` 문서 목록(결정 0051)은 `docMention`(`docMentionActions`)을 `AiComposer`의 `docs`로 넘기고, 같은 첨부 길로 붙인다. 열린 문서 고르기는 `window.aiOfficeDocs`가 있을 때만 나오고, 고른 파일은 드라이브 첨부와 같은 길(`docs:files-*`)로 첨부 칸에 들어간다.
 - 다른 에디터가 쓰는 문서 생성 흐름 `createAiDocument`(시트와 PDF의 AI가 새 docx·pdf·md를 만들 때 이 함수로 들어온다)와 프로젝트 IPC(`registerProjectIpc`).
 
+공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문 도구·ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. 전용 preload와 `hostWorkspaceEditor`에 연결했으며, 아직 공용 패널이나 모델 실행은 이 경로를 부르지 않는다. 메모·각주·머리말·꼬리말 같은 별도 저장소와 긴 글 작성기·그림·파일·네트워크는 내놓지 않는다. `tests/workspace-adapter.test.ts`는 실제 합성 편집기에서 원래 도구와 결과·추적·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`가 빌드한 앱의 전용 통신을 확인한다.
+
 ## 맡지 않는 것 (경계)
 
 - docx의 해석·조각 생성·바이트 단위 문단 패치는 이 모듈의 범위가 아니다. `packages/docx-engine`이 한다. 형식 문제를 렌더러나 메인에서 우회해 고치지 않는다.

@@ -929,8 +929,36 @@ export type AgentReadPictureResult =
   | { ok: false; reason: 'too_large'; bytes: number }
 
 /** What the plugin answers to, by method name (the studio's `plugins.invoke`). */
+export interface AgentWorkspaceVersion {
+  instance: string
+  revision: string
+}
+
+export interface AgentWorkspaceState extends AgentWorkspaceVersion {
+  foreignChanges: number
+  /** HWP has no masking marker support; callers must not describe this as redacted content. */
+  masking: 'unsupported'
+  selection: AgentSelectionResult
+}
+
+export interface AgentWorkspaceSnapshot extends AgentWorkspaceState {
+  text: string
+}
+
+export type AgentWorkspaceInvokeResult =
+  | (AgentWorkspaceVersion & { ok: true; foreignChanges: number; value: unknown })
+  | { ok: false; reason: 'changed' | 'unsupported-method' }
+
 export interface AgentPluginSurface {
   foreignChanges(): number
+  workspaceState(): AgentWorkspaceState
+  workspaceSnapshot(): AgentWorkspaceSnapshot
+  workspaceInvoke(
+    expected: AgentWorkspaceVersion,
+    method: string,
+    args: unknown[],
+  ): AgentWorkspaceInvokeResult
+  readSelectionSnapshot(segments: AgentSegment[]): string
   readText(): string
   listPictures(): AgentPictureList
   readPicture(picture: number): AgentReadPictureResult
@@ -1177,6 +1205,8 @@ export type AgentPageTarget =
 
 /** The part of the studio's plugin host this plugin uses. */
 export interface AgentPluginHost {
+  /** The studio increments this when another document replaces the current one. */
+  currentGeneration?(): number
   read<T>(fn: (doc: never) => T): T
   transaction<T>(label: string, fn: (tx: { doc(): never; deferPagination(): void }) => T): T
   events: { on(name: 'document-changed', handler: () => void): unknown }
