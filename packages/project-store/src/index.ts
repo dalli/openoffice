@@ -1,5 +1,6 @@
 export { ProjectStore, canonicalPathKey } from './store.js'
 export type {
+  ChatAttachment,
   ChatMessage,
   ChatMeta,
   ChatScope,
@@ -10,6 +11,7 @@ export type {
   ProjectSummary,
   TimelineEntry,
   ToolActivity,
+  WorkspaceChatInfo,
 } from './types.js'
 export type {
   AppendChatArgs,

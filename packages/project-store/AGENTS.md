@@ -4,6 +4,8 @@
 
 문서별 AI 대화 기록과 "프로젝트"(파일 묶음)를 사용자 PC에 저장한다. `<userData>/projects/` 아래의 `index.json`, `<projectId>/project.json`, `<projectId>/chats/<chatId>.jsonl`을 읽고 쓴다. 렌더러와 메인이 함께 쓰는 IPC 계약 타입(`ProjectApi`)도 여기서 정의한다. Docs·Sheets·Slides 메인 프로세스가 `ProjectStore`를 만들어 쓰고, HTML·Markdown을 포함한 다섯 편집기의 preload와 렌더러는 타입만 가져간다.
 
+새 다중 문서 대화는 같은 `ProjectStore`의 `<userData>/projects/.workspace/v1/<id>.json`(버전·무작위 id·제목·생성 시각)과 `.jsonl`에 보관한다. 기존 문서의 경로 맵·프로젝트 목록과 구분하며 JSONL 쓰기/읽기·상한·첫 답 전 버퍼를 공유한다. `createWorkspaceChat`·`workspaceChatInfo`·`listWorkspaceChats`·`renameWorkspaceChat`·`appendWorkspaceChatMessage`·`loadWorkspaceChat`은 파일에 닿기 전 id를 검사한다. 모르는 정보 버전은 거절하고 원문을 덮어쓰지 않는다. 기존 기록을 자동 이전하거나 복사하지 않는다.
+
 ## 맡지 않는 것 (경계)
 
 - IPC 핸들러 등록과 userData 경로 결정은 각 앱의 메인 프로세스가 한다. 이 패키지는 Electron을 import하지 않고 경로를 생성자 인자로 받는다.

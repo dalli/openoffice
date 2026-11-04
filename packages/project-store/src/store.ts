@@ -40,6 +40,7 @@ import type {
   ProjectInfo,
   ProjectSummary,
   TimelineEntry,
+  WorkspaceChatInfo,
 } from './types.js'
 
 // ────────────────────────────────────────────────────────────
@@ -361,6 +362,82 @@ export class ProjectStore {
     return join(this.chatsDir(projectId), `${chatId}.jsonl`)
   }
 
+  private workspaceChatPath(id: string, extension: 'json' | 'jsonl'): string {
+    assertSafeId(id, 'chatId')
+    return join(this.baseDir, '.workspace', 'v1', `${id}.${extension}`)
+  }
+
+  /** Explicit creation never binds a file path, imports history or changes settings. */
+  createWorkspaceChat(title = ''): WorkspaceChatInfo {
+    let id: string
+    do {
+      id = randomBytes(16).toString('hex')
+    } while (
+      existsSync(this.workspaceChatPath(id, 'json')) ||
+      existsSync(this.workspaceChatPath(id, 'jsonl'))
+    )
+    const info: WorkspaceChatInfo = {
+      version: 1,
+      id,
+      title: title.slice(0, 200),
+      createdAt: nowIso(),
+    }
+    writeJson(this.workspaceChatPath(id, 'json'), info)
+    return info
+  }
+
+  workspaceChatInfo(id: string): WorkspaceChatInfo | null {
+    const path = this.workspaceChatPath(id, 'json')
+    try {
+      if (statSync(path).size > 8_192) return null
+      const info = readJson<WorkspaceChatInfo>(path)
+      if (
+        info?.version !== 1 ||
+        info.id !== id ||
+        typeof info.title !== 'string' ||
+        info.title.length > 200 ||
+        typeof info.createdAt !== 'string' ||
+        !Number.isFinite(Date.parse(info.createdAt))
+      )
+        return null
+      return { version: 1, id, title: info.title, createdAt: info.createdAt }
+    } catch {
+      return null
+    }
+  }
+
+  listWorkspaceChats(): WorkspaceChatInfo[] {
+    const dir = join(this.baseDir, '.workspace', 'v1')
+    if (!existsSync(dir)) return []
+    return readdirSync(dir)
+      .filter((name) => /^[A-Za-z0-9_-]+\.json$/.test(name))
+      .flatMap((name) => {
+        const info = this.workspaceChatInfo(name.slice(0, -5))
+        return info ? [info] : []
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id))
+  }
+
+  renameWorkspaceChat(id: string, title: string): void {
+    const info = this.workspaceChatInfo(id)
+    if (!info) throw new Error('Workspace chat is missing or has an unsupported format')
+    writeJson(this.workspaceChatPath(id, 'json'), { ...info, title: title.slice(0, 200) })
+  }
+
+  appendWorkspaceChatMessage(id: string, msg: Omit<ChatMessage, 'seq' | 'ts'>): void {
+    if (!this.workspaceChatInfo(id)) {
+      throw new Error('Workspace chat is missing or has an unsupported format')
+    }
+    this.appendStoredMessage(this.workspaceChatPath(id, 'jsonl'), `.workspace:${id}`, msg)
+  }
+
+  loadWorkspaceChat(id: string, limit = DEFAULT_CHAT_LIMIT): ChatMessage[] {
+    if (!this.workspaceChatInfo(id)) {
+      throw new Error('Workspace chat is missing or has an unsupported format')
+    }
+    return this.loadStoredChat(this.workspaceChatPath(id, 'jsonl'), `.workspace:${id}`, limit)
+  }
+
   /**
    * The key a path is stored under in one of the index maps, looking through the
    * alternate spellings as well: an older version keyed entries under the raw
@@ -407,8 +484,7 @@ export class ProjectStore {
     return `${projectId}:${chatId}`
   }
 
-  private nextSeq(projectId: string, chatId: string): number {
-    const key = this.seqKey(projectId, chatId)
+  private nextSeq(filePath: string, key: string): number {
     const cur = this.seqCounters.get(key)
     if (cur !== undefined) {
       const next = cur + 1
@@ -416,7 +492,7 @@ export class ProjectStore {
       return next
     }
     // Initialization: scan the existing file for the max seq
-    const existing = this.loadChat(projectId, chatId, 10_000)
+    const existing = this.loadStoredChat(filePath, key, 10_000)
     const maxSeq = existing.reduce((m, msg) => Math.max(m, msg.seq), -1)
     const next = maxSeq + 1
     this.seqCounters.set(key, next)
@@ -712,8 +788,18 @@ export class ProjectStore {
     // Validate ids before the IO try block so traversal attempts throw fail-closed
     assertSafeId(projectId, 'projectId')
     assertSafeId(chatId, 'chatId')
+    this.appendStoredMessage(this.chatPath(projectId, chatId), this.seqKey(projectId, chatId), msg)
+  }
+
+  private appendStoredMessage(
+    filePath: string,
+    key: string,
+    msg: Omit<ChatMessage, 'seq' | 'ts'> & { ts?: string },
+  ): void {
+    if (msg.role !== 'user' && msg.role !== 'assistant') throw new Error('Invalid message role')
+    if (typeof msg.text !== 'string') throw new Error('Invalid message text')
     try {
-      const seq = this.nextSeq(projectId, chatId)
+      const seq = this.nextSeq(filePath, key)
       const ts = msg.ts ?? nowIso()
       const text =
         msg.text.length > TEXT_MAX_CHARS
@@ -756,32 +842,28 @@ export class ProjectStore {
         if (skills.length > 0) record.skills = skills
       }
 
-      const key = this.seqKey(projectId, chatId)
-      if (msg.role !== 'assistant' && !existsSync(this.chatPath(projectId, chatId))) {
+      if (msg.role !== 'assistant' && !existsSync(filePath)) {
         const buf = this.pendingFirstWrite.get(key) ?? []
         buf.push(record)
         // Bound the in-memory buffer: overflow materializes the file early
         // instead of dropping user messages.
         if (buf.length >= MAX_PENDING_OPENING_MESSAGES) {
-          ensureDir(this.chatsDir(projectId))
+          ensureDir(dirname(filePath))
           const lines = buf.map((r) => JSON.stringify(r) + '\n').join('')
-          appendJsonLines(this.chatPath(projectId, chatId), lines)
+          appendJsonLines(filePath, lines)
           this.pendingFirstWrite.delete(key)
           return
         }
         this.pendingFirstWrite.set(key, buf)
         return
       }
-      ensureDir(this.chatsDir(projectId))
+      ensureDir(dirname(filePath))
       const buf = this.pendingFirstWrite.get(key) ?? []
       const lines = [...buf, record].map((r) => JSON.stringify(r) + '\n').join('')
-      appendJsonLines(this.chatPath(projectId, chatId), lines)
+      appendJsonLines(filePath, lines)
       this.pendingFirstWrite.delete(key)
     } catch (err) {
-      console.warn(
-        `[project-store] appendChatMessage failed for ${this.chatPath(projectId, chatId)}:`,
-        err,
-      )
+      console.warn(`[project-store] appendChatMessage failed for ${filePath}:`, err)
       throw err
     }
   }
@@ -794,10 +876,17 @@ export class ProjectStore {
     // Validate ids fail-closed before touching the filesystem
     assertSafeId(projectId, 'projectId')
     assertSafeId(chatId, 'chatId')
+    return this.loadStoredChat(
+      this.chatPath(projectId, chatId),
+      this.seqKey(projectId, chatId),
+      limit,
+    )
+  }
+
+  private loadStoredChat(filePath: string, key: string, limit: number): ChatMessage[] {
     // Clamp limit so 0 no longer returns all messages via slice(-0)
     const safeLimit = normalizeChatLimit(limit)
-    const pending = this.pendingFirstWrite.get(this.seqKey(projectId, chatId)) ?? []
-    const filePath = this.chatPath(projectId, chatId)
+    const pending = this.pendingFirstWrite.get(key) ?? []
     const messages: ChatMessage[] = [...pending]
     try {
       if (existsSync(filePath)) messages.push(...parseChatRecords(readChatTail(filePath)))

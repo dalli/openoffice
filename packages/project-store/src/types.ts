@@ -104,6 +104,14 @@ export interface ChatMeta {
   approxCount: number
 }
 
+/** Local multi-document history, separate from path-derived document chats. */
+export interface WorkspaceChatInfo {
+  version: 1
+  id: string
+  title: string
+  createdAt: string
+}
+
 // ────────────────────────────────────────────────────────────
 // Extended API types (P1)
 // ────────────────────────────────────────────────────────────
