@@ -267,11 +267,13 @@ draw.io 다이어그램(`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`)을 읽�
 
 ## 셸 내부 작업 화면 계약 (결정 0107, 구현 중)
 
-- 메인↔편집기 통신은 `workspace-ai:editor-request / editor-reply / editor-cancel` 전용 채널을 쓴다. HWP·DOCX·Markdown preload는 요청 수신·답·취소만 내주며 다른 문서나 임의 채널을 호출할 수 없다. `TabManager.workspaceEditorForTab`이 이미 불러온 같은 창의 보기를 확인하고 메인 연결은 실제 보기·최상위 프레임·요청 번호·응답 구조를 검사한다. 이 통신은 공개 MCP·기존 AI 채널·대화 저장 형식을 바꾸지 않는다. 공용 패널과 실행 바인딩 모델의 통합은 남았다.
+- 메인↔편집기 통신은 `workspace-ai:editor-request / editor-reply / editor-cancel` 전용 채널을 쓴다. HWP·DOCX·Markdown preload는 요청 수신·답·취소만 내주며 다른 문서나 임의 채널을 호출할 수 없다. `TabManager.workspaceEditorForTab`이 이미 불러온 같은 창의 보기를 확인하고 메인 연결은 실제 보기·최상위 프레임·요청 번호·응답 구조를 검사한다. 이 통신은 공개 MCP·기존 AI 채널·대화 저장 형식을 바꾸지 않는다. 실행 바인딩 모델은 `WorkspaceExecutionController`로 연결했다. 캡처·참고 snapshot은 메인이 발급한 식별자로만 고르며, 실행 핸들은 창·패널 세대·대화·실행·binding 번호를 모두 검사한다. 공용 실행 호스트는 가짜 모델로 연결·검사했으며, 기본 화면의 공용 패널과 실제 구독 전송 통합은 남았다.
+
+- 내부 편집기 통신의 `rollback`은 편집기가 발급한 토큰과 문서 인스턴스/버전으로 편집기 안의 스냅숏을 복원한다. 토큰은 한 번만 소비하며 수동 변경·읽기 전용·새 세대·진행 중 실행은 거절한다. 패널에는 메인이 별도로 발급한 소유자·대화·실행·binding 토큰만 내준다. 스냅숏 본문은 전송·저장하지 않는다. 현재 DOCX·Markdown만 지원한다. 기본 패널 IPC로 공개한 기능은 아니다.
 
 - `window.aiOfficeTabs.showSplitMenu(x, y)`는 `tabs:show-split-menu`로 네이티브 화면 나누기 메뉴를 연다. 좌표는 창 콘텐츠의 CSS px이며, 주 창의 최상위 프레임만 요청할 수 있다. 메뉴가 닫히면 Promise가 끝난다. 분할·사본·복구·저장은 기존 탭 관리자의 길을 사용한다.
-- 공용 AI의 `workspace-ai-api.ts`는 **미등록 내부 모델**이다. 공개 MCP·터미널 출력이나 기존 `ai:*` 채널의 대체 계약이 아니다. main이 소유한 창·패널 세대와 발급한 바인딩 번호, 대화·실행·문서 세대·선택·프로젝트로 요청과 답을 짝짓는다. 참고 문서에 대한 쓰기, 모르는 도구, 중복 호출, 끝난 실행의 답은 거절한다.
-- 기존 문서별·프로젝트 대화 파일과 홈의 임시 대화는 그대로다. 새 보관 형식이나 자동 이전, 공용 패널의 실행 라우팅은 아직 켜지 않았다. 구체적인 출처 연결과 이행 조건은 [작업 화면 연결 계약](plans/workspace-ui-contracts.md)에 있다.
+- 공용 AI의 `workspace-ai-api.ts`는 **메인 내부 계약**이다. 공개 MCP·터미널 출력이나 기존 `ai:*` 채널의 대체 계약이 아니다. main이 소유한 창·패널 세대와 발급한 바인딩 번호, 대화·실행·문서 세대·선택·프로젝트로 요청과 답을 짝짓는다. 참고 문서에 대한 쓰기, 모르는 도구, 중복 호출, 끝난 실행의 답은 거절한다.
+- 기존 문서별·프로젝트 대화 파일과 홈의 임시 대화는 출처 참조로 연결하며 자동 이전·병합하지 않는다. 새 로컬 대화만 `ProjectStore`의 `<userData>/projects/.workspace/v1/<무작위 id>.json`(정보: `version: 1`, `id`, `title`, `createdAt`)과 같은 이름의 `.jsonl`(기존 `ChatMessage` 형식)에 보관한다. 문서 경로 맵·기존 프로젝트 목록에는 넣지 않고, 첫 assistant 답 전 버퍼와 메시지 크기/읽기 상한을 공유한다. 모르는 정보 버전은 덮어쓰지 않는다. 이 분기와 출처 라우터는 아직 기본 화면·공용 IPC에 연결하지 않았다. 구체적인 출처 연결과 이행 조건은 [작업 화면 연결 계약](plans/workspace-ui-contracts.md)에 있다.
 
 ## 에이전트 스킬
 
