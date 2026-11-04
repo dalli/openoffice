@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiSubscriptionState, SubscriptionStatusMap } from '@genoffice/ai-provider/browser'
+import { defaultAiSettings } from '@genoffice/ai-provider'
 import { LANGS } from '@genoffice/i18n'
 import { aiSubscriptionText } from '@genoffice/ui'
 import { Onboarding } from '../src/renderer/src/Onboarding'
@@ -126,6 +127,77 @@ describe('onboarding steps', () => {
 })
 
 describe('Onboarding', () => {
+  it('leaves editing keys in the free connection input and ignores IME navigation keys', async () => {
+    vi.stubGlobal('aiOffice', {
+      getAiSettings: async () => defaultAiSettings(),
+      onAiSettingsChanged: () => () => {},
+    })
+    try {
+      renderOnboarding()
+      await click('.onb-next')
+      await click('.onb-slide.active [data-path="free"]')
+      const input = host.querySelector<HTMLInputElement>('.onb-slide.active input')!
+      expect(input).not.toBeNull()
+      act(() => input.focus())
+      for (const value of ['ArrowLeft', 'ArrowRight', 'Enter']) {
+        const event = new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })
+        act(() => input.dispatchEvent(event))
+        expect(event.defaultPrevented).toBe(false)
+        expect(activeStep()).toBe('connect')
+      }
+      const card = host.querySelector<HTMLElement>('.onb-card')!
+      act(() => card.focus())
+      for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+        act(() =>
+          card.dispatchEvent(
+            new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...init }),
+          ),
+        )
+        expect(activeStep()).toBe('connect')
+      }
+      act(() =>
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })),
+      )
+      expect(activeStep()).toBe('done')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps Tab inside the active slide and restores the opening control', () => {
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    opener.focus()
+    try {
+      renderOnboarding()
+      const card = host.querySelector<HTMLElement>('.onb-card')!
+      expect(document.activeElement).toBe(card)
+      act(() =>
+        card.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'Tab',
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      )
+      expect(document.activeElement).toBe(host.querySelector('.onb-next'))
+      act(() =>
+        (document.activeElement as HTMLElement).dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+        ),
+      )
+      expect(document.activeElement).toBe(host.querySelector('.onb-dot'))
+      act(() => opener.focus())
+      expect(document.activeElement).toBe(card)
+      act(() => root.render(null))
+      expect(document.activeElement).toBe(opener)
+    } finally {
+      opener.remove()
+    }
+  })
+
   it('shows three steps: welcome first, one dot each', () => {
     renderOnboarding()
     expect(

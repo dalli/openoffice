@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AiConnectGuide,
   AiMark,
   aiSubscriptionProviderName,
   aiSubscriptionText,
+  isEditingKeyTarget,
+  useModalKeys,
 } from '@genoffice/ui'
 import { FREE_AI_PROVIDERS, freeAiConnected } from '@genoffice/ai-provider/browser'
 import appIcon from './assets/app-icon.png'
@@ -73,7 +75,6 @@ export function Onboarding({
   const { t, lang } = useI18n()
   const [index, setIndex] = useState(0)
   const [submitting, setSubmitting] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
   const isLast = isLastOnboardingStep(index)
   // the notice waits for the step that is about the connection
   const noticeOpen = noticeDue && index >= ONBOARDING_CONNECT_STEP
@@ -109,11 +110,12 @@ export function Onboarding({
     else setIndex(target)
   }
 
-  // move focus into the dialog on mount so keyboard users start inside it
-  // (the container, not a button, so no focus ring shows on open)
-  useEffect(() => {
-    cardRef.current?.focus()
-  }, [])
+  const modalKeys = useModalKeys(finish, {
+    active: !noticeOpen,
+    initialFocus: 'container',
+    restoreFocus: true,
+  })
+  const cardRef = modalKeys.ref
 
   // slide changes can strip focus from the active control (leaving the connect
   // step makes its card buttons inert, which blurs them) — pull focus back onto
@@ -123,50 +125,30 @@ export function Onboarding({
     const card = cardRef.current
     const active = document.activeElement
     if (card && (!(active instanceof HTMLElement) || !card.contains(active))) card.focus()
-  }, [index, noticeOpen])
+  }, [index, noticeOpen, cardRef])
 
-  // keyboard handling: Escape skips, Enter / ArrowRight advance, ArrowLeft goes
-  // back, and Tab is trapped inside the dialog (aria-modal). Enter is ignored
-  // when a button is focused so the native click doesn't double-fire.
+  // Native controls own their editing keys; only the slide background uses
+  // Enter and arrows for navigation. Modal Tab/Escape behavior is shared.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // the notice above owns the keyboard while it is open
-      if (noticeOpen) return
+      if (noticeOpen || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       if (event.key === 'Escape') {
+        event.preventDefault()
         finish()
         return
       }
-      if (event.key === 'Tab') {
-        const card = cardRef.current
-        if (!card) return
-        // inactive slides stay mounted (stacked for the height lock) but are
-        // inert — their buttons must not enter the tab cycle
-        const focusables = Array.from(card.querySelectorAll<HTMLElement>('button')).filter(
-          (el) => !el.closest('[inert]') && !el.hasAttribute('disabled'),
-        )
-        if (focusables.length === 0) return
-        const first = focusables[0]
-        const last = focusables[focusables.length - 1]
-        const active = document.activeElement
-        // the card itself holds focus on open/slide change; from there, Tab in
-        // either direction must land on a dialog control, never behind the modal
-        const onButton = active instanceof HTMLElement && focusables.includes(active)
-        if (!onButton) {
-          event.preventDefault()
-          ;(event.shiftKey ? last : first).focus()
-        } else if (event.shiftKey && active === first) {
-          event.preventDefault()
-          last.focus()
-        } else if (!event.shiftKey && active === last) {
-          event.preventDefault()
-          first.focus()
-        }
-        return
-      }
+      if (isEditingKeyTarget(event.target)) return
       const buttonFocused =
-        event.target instanceof HTMLElement && event.target.closest('button') !== null
-      if ((event.key === 'Enter' && !buttonFocused) || event.key === 'ArrowRight') next()
-      if (event.key === 'ArrowLeft') setIndex((i) => previousOnboardingStep(i))
+        event.target instanceof HTMLElement && event.target.closest('button, a[href]') !== null
+      if ((event.key === 'Enter' && !buttonFocused) || event.key === 'ArrowRight') {
+        event.preventDefault()
+        next()
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        setIndex((i) => previousOnboardingStep(i))
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -240,7 +222,7 @@ export function Onboarding({
       aria-modal="true"
       aria-label={titles[ONBOARDING_STEPS[index]!]}
     >
-      <div className="onb-card" ref={cardRef} tabIndex={-1}>
+      <div className="onb-card" ref={cardRef} onKeyDown={modalKeys.onKeyDown} tabIndex={-1}>
         {/* all slides stay mounted, stacked in one grid cell: the card locks to
             the tallest slide's height for the language, so the footer and its
             buttons never move between steps. Inactive slides are inert. */}

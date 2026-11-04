@@ -80,6 +80,8 @@
 
 ## 테스트
 
+- 모달의 공용 키보드 처리는 `modal-keys.ts`의 `useModalKeys`·`trapTab`이다. 숨김·비활성·inert 컨트롤을 건너뛰고, 중첩 모달은 가장 안쪽 창이 초점을 소유한다. 설정·첫 실행 안내는 닫힌 뒤 호출 위치로 초점을 돌려준다. `isEditingKeyTarget`과 IME 검사는 입력의 Enter·화살표를 안내 이동으로 가로채지 않게 한다. 모델 선택기의 현재 항목 초점·↑↓·Home·End·Enter·Escape·복귀는 `ai-model-picker-keyboard.test.ts`, 모달의 수명과 초점은 `modal-keys-focus.test.ts`에서 검사한다.
+
 - 실행: `npm run test -w @genoffice/ui`(또는 이 폴더에서 `npx vitest run`), `npm run typecheck -w @genoffice/ui`. Windows에서 전부 통과한다.
 - 기본 환경은 `node`다. DOM이 필요한 테스트는 파일 첫 줄에 `/** @vitest-environment jsdom */`를 달고 `react-dom/client`의 `createRoot`와 `act`로 렌더링한다.
 - `tests/editors-consistency.test.ts`는 저장소의 `apps/*` 소스를 읽는다. 에디터의 패널·리본 파일을 옮기거나 이름을 바꾸면 이 테스트의 `EDITORS` 표도 함께 고친다. 이 패키지만 떼어 놓고는 돌릴 수 없다.

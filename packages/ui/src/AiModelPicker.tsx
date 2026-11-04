@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Lang } from '@genoffice/i18n'
 import type { AiEffort, AiSettings, AiSubscriptionStatuses } from '@genoffice/ai-provider/browser'
 import {
@@ -17,7 +17,7 @@ import { AiMark } from './AiMark'
 import { AiCodexNotice } from './AiSubscriptionNotices'
 import { changeStoredAiSettings } from './ai-send-gate'
 import { ProviderLogo } from './provider-logos'
-import { useDismissablePopover } from './popover-dismiss'
+import { revealInList, useDismissablePopover } from './popover-dismiss'
 import { AI_EFFORT_STRINGS, AI_MODEL_PICKER_STRINGS } from './strings-ai-model-picker'
 import { aiSubscriptionText } from './strings-ai-subscription'
 
@@ -105,10 +105,13 @@ export function AiModelPicker({
   const effortStrings = AI_EFFORT_STRINGS[lang] ?? AI_EFFORT_STRINGS.en
   const [settings, setSettings] = useState<AiSettings | null>(null)
   const [open, setOpen] = useState(false)
+  const [activeOption, setActiveOption] = useState<string | null>(null)
   const [popStyle, setPopStyle] = useState<React.CSSProperties>({})
   const chipRef = useRef<HTMLButtonElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
   const refreshedAt = useRef(0)
+  const popId = useId()
+  const listId = `${popId}-models`
 
   // tests render panels without a preload bridge: a throwing getter must not take the panel down
   const refresh = useCallback(() => {
@@ -147,8 +150,24 @@ export function AiModelPicker({
     g.id === current?.provider && (g.id !== 'custom' || g.endpoint === current?.endpoint)
   const currentUsable = groups.some(sameGroup)
 
+  const focusOption = (option: HTMLButtonElement | undefined | null) => {
+    option?.focus({ preventScroll: true })
+    revealInList(option, '.ai-model-pop-list')
+  }
+
+  useEffect(() => {
+    const pop = popRef.current
+    if (!open || !pop || pop.contains(document.activeElement)) return
+    const option =
+      pop.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]') ??
+      pop.querySelector<HTMLButtonElement>('[role="option"], .ai-model-manage')
+    option?.focus({ preventScroll: true })
+    revealInList(option, '.ai-model-pop-list')
+  }, [open, groups])
+
   const toggle = () => {
     if (!open) {
+      setActiveOption(null)
       const rect = chipRef.current?.getBoundingClientRect()
       // the composer sits at the panel bottom, a dialog's chip near its top: fit the side with room
       if (rect)
@@ -179,6 +198,7 @@ export function AiModelPicker({
 
   const pick = (sel: AiProviderPickerSelection) => {
     setOpen(false)
+    chipRef.current?.focus({ preventScroll: true })
     // a level the newly picked model does not take is dropped, so the chip does not show it
     save((latest) =>
       withAiEffortFitted(withAiProviderSelection(latest, sel), subscriptionStatuses ?? {}),
@@ -236,12 +256,40 @@ export function AiModelPicker({
   return (
     <div
       className="ai-model-picker"
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false)
+      }}
       onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
         if (e.key === 'Escape' && open) {
+          e.preventDefault()
           e.stopPropagation()
           setOpen(false)
-          chipRef.current?.focus()
+          chipRef.current?.focus({ preventScroll: true })
+          return
         }
+        if (!open) {
+          if (e.target === chipRef.current && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault()
+            e.stopPropagation()
+            toggle()
+          }
+          return
+        }
+        const target = e.target as HTMLElement
+        if (target !== chipRef.current && !target.closest('.ai-model-pop-list')) return
+        const options = [
+          ...(popRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? []),
+        ]
+        const index = options.indexOf(target as HTMLButtonElement)
+        if (e.key === 'ArrowDown') focusOption(options[Math.min(options.length - 1, index + 1)])
+        else if (e.key === 'ArrowUp') focusOption(options[Math.max(0, index - 1)])
+        else if (e.key === 'Home') focusOption(options[0])
+        else if (e.key === 'End') focusOption(options[options.length - 1])
+        else if ((e.key === 'Enter' || e.key === ' ') && index >= 0) options[index]?.click()
+        else return
+        e.preventDefault()
+        e.stopPropagation()
       }}
     >
       {showLabel && (
@@ -254,8 +302,9 @@ export function AiModelPicker({
         type="button"
         className={`ai-model-chip${open ? ' open' : ''}`}
         onClick={toggle}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={open}
+        aria-controls={open ? popId : undefined}
         data-tip={chipTip}
         aria-label={`${strings.title}: ${withEffort(fullText)}`}
       >
@@ -280,12 +329,13 @@ export function AiModelPicker({
       {open && (
         <div
           ref={popRef}
+          id={popId}
           className="ai-model-pop"
-          role="listbox"
+          role="dialog"
           aria-label={strings.title}
           style={popStyle}
         >
-          <div className="ai-model-pop-list">
+          <div className="ai-model-pop-list" id={listId} role="listbox" aria-label={strings.title}>
             {groups.map((g) => (
               <div key={g.endpoint ? `${g.id}:${g.endpoint}` : g.id} className="ai-model-group">
                 {g.kind !== 'auto' && (
@@ -317,33 +367,49 @@ export function AiModelPicker({
                     g.kind === 'auto'
                       ? aiSubscriptionModelName(settings, subscriptionStatuses ?? {}, g.resolved)
                       : undefined
+                  const optionKey = `${g.id}:${g.endpoint ?? ''}:${m}`
+                  const label =
+                    g.kind === 'auto'
+                      ? autoModel
+                        ? aiSubscriptionText(lang, 'pickerAutoUsingModel', {
+                            provider: g.label,
+                            model: autoModel,
+                          })
+                        : aiSubscriptionText(lang, 'pickerAutoUsing', { provider: g.label })
+                      : g.kind === 'subscription'
+                        ? m
+                          ? (detail?.name ?? m)
+                          : detail
+                            ? aiSubscriptionText(lang, 'pickerDefaultModelNamed', {
+                                model: detail.name,
+                              })
+                            : aiSubscriptionText(lang, 'pickerDefaultModel')
+                        : m || g.label
+                  const fullLabel = `${g.kind === 'auto' ? '' : `${g.label} · `}${label}${detail?.concrete ? ` (${detail.concrete})` : ''}`
                   return (
                     <button
-                      key={`${g.id}:${g.endpoint ?? ''}:${m}`}
+                      key={optionKey}
                       type="button"
                       role="option"
                       aria-selected={selected}
+                      aria-label={fullLabel}
+                      title={fullLabel}
+                      tabIndex={
+                        activeOption === null
+                          ? selected
+                            ? 0
+                            : -1
+                          : activeOption === optionKey
+                            ? 0
+                            : -1
+                      }
                       className={`ai-model-item${g.kind === 'auto' ? ' ai-model-auto' : ''}${selected ? ' selected' : ''}`}
                       onClick={() => pick({ provider: g.id, endpoint: g.endpoint, model: m })}
+                      onFocus={() => setActiveOption(optionKey)}
                     >
                       {g.kind === 'auto' && <PickerMark group={g} />}
                       <span className="ai-model-item-text">
-                        {g.kind === 'auto'
-                          ? autoModel
-                            ? aiSubscriptionText(lang, 'pickerAutoUsingModel', {
-                                provider: g.label,
-                                model: autoModel,
-                              })
-                            : aiSubscriptionText(lang, 'pickerAutoUsing', { provider: g.label })
-                          : g.kind === 'subscription'
-                            ? m
-                              ? (detail?.name ?? m)
-                              : detail
-                                ? aiSubscriptionText(lang, 'pickerDefaultModelNamed', {
-                                    model: detail.name,
-                                  })
-                                : aiSubscriptionText(lang, 'pickerDefaultModel')
-                            : m || g.label}
+                        {label}
                         {detail?.concrete && (
                           <>
                             {' '}

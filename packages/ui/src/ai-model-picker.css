@@ -136,9 +136,8 @@
 .ai-model-item-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 /* the concrete model id beside a model's display name, when the CLI listed its models */

@@ -7,31 +7,92 @@
 import { useEffect, useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-const FOCUSABLE = 'a[href], button, input, textarea, select, [tabindex]:not([tabindex="-1"])'
+const FOCUSABLE =
+  'a[href], button, input, textarea, select, [contenteditable]:not([contenteditable="false"]), [tabindex]'
 
-export function useModalKeys(onClose: () => void, options?: { restoreFocus?: boolean }) {
+/** Editing and native form controls own Enter and arrow keys, including IME input. */
+export function isEditingKeyTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  if (target.closest('input, textarea, select')) return true
+  const editable = target.closest('[contenteditable]')
+  return editable !== null && editable.getAttribute('contenteditable') !== 'false'
+}
+
+function available(el: HTMLElement): boolean {
+  if (el.matches(':disabled') || el.closest('[inert], [hidden], [aria-hidden="true"]')) return false
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') return false
+  }
+  return true
+}
+
+function focusableItems(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
+    (el) =>
+      available(el) &&
+      (el.tabIndex >= 0 || (el.hasAttribute('contenteditable') && !el.hasAttribute('tabindex'))),
+  )
+}
+
+// Child effects can mount before their parent. Prefer the innermost modal,
+// then the latest sibling, so a notice above another dialog owns the keyboard.
+const modals: HTMLElement[] = []
+function currentModal(): HTMLElement | undefined {
+  for (let i = modals.length - 1; i >= 0; i--) {
+    const el = modals[i]!
+    if (
+      el.isConnected &&
+      !modals.some((other) => other !== el && other.isConnected && el.contains(other))
+    )
+      return el
+  }
+  return undefined
+}
+
+export function useModalKeys(
+  onClose: () => void,
+  options?: { restoreFocus?: boolean; active?: boolean; initialFocus?: 'first' | 'container' },
+) {
   const ref = useRef<HTMLDivElement>(null)
   const restoreFocus = options?.restoreFocus ?? false
+  const active = options?.active ?? true
+  const initialFocus = options?.initialFocus ?? 'first'
 
   useEffect(() => {
     const el = ref.current
-    if (!el) return
     const previous =
       restoreFocus && document.activeElement instanceof HTMLElement ? document.activeElement : null
-    if (!el.contains(document.activeElement)) {
-      // skip disabled controls, the same way trapTab does: a modal whose only
-      // early control is disabled would otherwise never take focus at all
-      const first = [...el.querySelectorAll<HTMLElement>('input, textarea, select, button')].find(
-        (c) => !c.hasAttribute('disabled'),
-      )
-      ;(first ?? el).focus()
-    }
     return () => {
+      const index = el ? modals.indexOf(el) : -1
+      if (index >= 0) modals.splice(index, 1)
       if (previous && previous.isConnected) previous.focus()
     }
   }, [restoreFocus])
 
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !active) return
+    modals.push(el)
+    const focusInside = () => {
+      const first = initialFocus === 'container' ? undefined : focusableItems(el)[0]
+      ;(first ?? el).focus({ preventScroll: true })
+    }
+    const onFocus = (event: FocusEvent) => {
+      if (currentModal() === el && !el.contains(event.target as Node)) focusInside()
+    }
+    if (currentModal() === el && !el.contains(document.activeElement)) focusInside()
+    document.addEventListener('focusin', onFocus)
+    return () => {
+      document.removeEventListener('focusin', onFocus)
+      const index = modals.indexOf(el)
+      if (index >= 0) modals.splice(index, 1)
+    }
+  }, [active, initialFocus])
+
   const onKeyDown = (e: ReactKeyboardEvent) => {
+    if (!active || e.defaultPrevented || currentModal() !== ref.current) return
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
     if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
@@ -50,9 +111,7 @@ export function trapTab(
   e: { key: string; shiftKey: boolean; preventDefault: () => void },
 ): void {
   if (!container || e.key !== 'Tab') return
-  const items = [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => !el.hasAttribute('disabled') && el.tabIndex >= 0,
-  )
+  const items = focusableItems(container)
   if (items.length === 0) {
     e.preventDefault()
     return
@@ -63,10 +122,10 @@ export function trapTab(
   // A backdrop that holds focus itself is inside the trap, so name it alongside
   // the first/last control: without it Shift+Tab from the backdrop is left to
   // the browser and walks out of the modal.
-  if (e.shiftKey && (active === first || active === container || !container.contains(active))) {
+  if (e.shiftKey && (active === first || !items.includes(active!))) {
     e.preventDefault()
     last.focus()
-  } else if (!e.shiftKey && (active === last || active === container)) {
+  } else if (!e.shiftKey && (active === last || !items.includes(active!))) {
     e.preventDefault()
     first.focus()
   }

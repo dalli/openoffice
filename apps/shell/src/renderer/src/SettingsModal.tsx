@@ -11,6 +11,7 @@ import {
   aiPanelStartOf,
   aiPanelStartPatch,
   clampAiCustomFontSize,
+  useModalKeys,
 } from '@genoffice/ui'
 import type { AiFontSize, AiPanelPrefs, AiPanelSide, AiPanelStart } from '@genoffice/ui'
 import { PRODUCT_CONTACT_EMAIL, PRODUCT_REPO_SLUG } from '@genoffice/i18n'
@@ -1656,6 +1657,7 @@ export function SettingsModal({
   target,
 }: SettingsModalProps) {
   const { lang, setLang, t } = useI18n()
+  const modalKeys = useModalKeys(onClose, { restoreFocus: true })
   const [section, setSection] = useState<SectionId>(target?.section ?? 'account')
   useEffect(() => {
     if (target) setSection(target.section)
@@ -1736,14 +1738,6 @@ export function SettingsModal({
     return () => off?.()
   }, [])
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
-
   const applyTheme = (next: UiTheme) => {
     setTheme(next)
     void window.aiOffice.setTheme(next)
@@ -1813,7 +1807,15 @@ export function SettingsModal({
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="set-dialog" role="dialog" aria-modal="true" aria-label={t('settings')}>
+      <div
+        ref={modalKeys.ref}
+        onKeyDown={modalKeys.onKeyDown}
+        tabIndex={-1}
+        className="set-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('settings')}
+      >
         <div className="set-header">
           <h2 className="set-title">{t('settings')}</h2>
           <button className="set-close" onClick={onClose} aria-label={t('cancel')}>
