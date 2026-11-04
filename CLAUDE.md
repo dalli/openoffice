@@ -125,6 +125,11 @@ openoffice/
 - **릴리스 본문은 사용자가 앱 안에서 그대로 읽는다.** 첫 문단 요약 → 새로 들어간 것 → 고친 것 → 설치 안내(맨 아래) 순서와 humanize-korean 윤문은 `docs/releasing.ko.md` 6번이 정한다. 에이전트는 `.claude/skills/release-ieumoffice/SKILL.md`도 함께 읽는다.
 - **새 버전을 공개하면 소개 사이트에 업데이트 소식을 올린다.** https://ieumoffice.com 의 내려받기 버튼은 저절로 바뀌지만, 업데이트 페이지(`/updates`)의 새 항목과 메인의 한 줄 안내는 손으로 더한다. 사이트의 질문 도우미는 최신 릴리스 태그의 한국어 도움말·README·PRIVACY.md로 답하고, 그 지식베이스는 사이트 저장소의 Actions가 다시 만드니 실행이 초록인지 본다. 절차는 `docs/releasing.ko.md` 13번과 사이트 저장소(`E:\github\ieumoffice-site`) `README.md`의 "새 버전을 낸 뒤"에 있다.
 
+## 포크의 Git 작업
+
+- 브랜치 push와 PR은 사용자 포크 `dalli/openoffice`에만 보낸다. Git의 기본 push 원격은 이 포크를 가리키는 `origin`이고, GitHub CLI의 기본 저장소도 `dalli/openoffice`다. push 전에 원격 주소를 확인하고, PR 명령에는 `--repo dalli/openoffice`를 명시한다.
+- 원본 저장소로 보내는 PR은 사용자가 포크에서 전체 테스트를 완료했다고 알리고 별도로 요청한 뒤에만 만든다. 개발·검사 완료나 포크 PR 승인을 원본 PR 요청으로 해석하지 않는다.
+
 ## 문제가 생기면
 
 다음은 **즉시 사람에게 알린다.** 스스로 고치고 넘어가지 않는다.

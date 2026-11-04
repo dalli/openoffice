@@ -81,6 +81,7 @@
 
 - 커밋 글은 영어, Conventional Commits 꼴이다(`feat(scope): …`, `fix(scope): …`, `refactor(scope): …`, `chore: …`, `docs: …`).
 - 작업은 가지에서 하고, `main`으로의 병합은 사람이 정한다.
+- 브랜치 push와 PR은 사용자 포크 `dalli/openoffice`에만 보낸다. push 전 원격 주소를 확인하고 PR 명령에는 `--repo dalli/openoffice`를 명시한다. 원본 저장소 PR은 사용자가 포크에서 전체 테스트를 완료했다고 알리고 별도로 요청한 뒤에만 만든다.
 - 커밋 작성자 주소로 개인 이메일을 쓰지 않는다. GitHub의 비공개 주소를 쓴다.
 
 ## 합치기 전에 통과해야 하는 검사
