@@ -265,6 +265,12 @@ draw.io 다이어그램(`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`)을 읽�
 - `get_app_info`의 `families`에 `{ family: "drawio", label: "diagram", editor: { open: ["drawio", "dio", "drawio.svg", "drawio.png", "vsdx"], save: ["drawio", "dio", "drawio.svg", "drawio.png"], export: ["png", "svg", "pdf"] } }`가 있다. `mcp` 항목은 없다.
 - 에이전트 모드의 세션 서버에는 두 다이어그램 도구가 없다(도구 목록은 그대로다). 그 서버의 `open_documents`는 다이어그램 탭도 목록에 내고 `read`로 같은 글을 읽는다.
 
+## 셸 내부 작업 화면 계약 (결정 0107, 구현 중)
+
+- `window.aiOfficeTabs.showSplitMenu(x, y)`는 `tabs:show-split-menu`로 네이티브 화면 나누기 메뉴를 연다. 좌표는 창 콘텐츠의 CSS px이며, 주 창의 최상위 프레임만 요청할 수 있다. 메뉴가 닫히면 Promise가 끝난다. 분할·사본·복구·저장은 기존 탭 관리자의 길을 사용한다.
+- 공용 AI의 `workspace-ai-api.ts`는 **미등록 내부 모델**이다. 공개 MCP·터미널 출력이나 기존 `ai:*` 채널의 대체 계약이 아니다. main이 소유한 창·패널 세대와 발급한 바인딩 번호, 대화·실행·문서 세대·선택·프로젝트로 요청과 답을 짝짓는다. 참고 문서에 대한 쓰기, 모르는 도구, 중복 호출, 끝난 실행의 답은 거절한다.
+- 기존 문서별·프로젝트 대화 파일과 홈의 임시 대화는 그대로다. 새 보관 형식이나 자동 이전, 실제 편집기 라우팅은 아직 켜지 않았다. 구체적인 출처 연결과 이행 조건은 [작업 화면 연결 계약](plans/workspace-ui-contracts.md)에 있다.
+
 ## 에이전트 스킬
 
 - 이름과 폴더는 `ieumoffice`다. 저장소의 `skills/ieumoffice/SKILL.md`가 원본이고, 앱의 설정 → 연동에서 고른 에이전트에 설치한다. 터미널에서는 `npx skills add pblsketch/openoffice`.

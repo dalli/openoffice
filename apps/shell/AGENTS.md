@@ -139,6 +139,9 @@
 
 ## 테스트
 
+- 작업 화면 개편(결정 0107)은 단계적이다. `split-menu.ts`·`tabs:show-split-menu`의 탭 표시줄 입구는 기존 분할 경로를 쓴다. `shared/workspace-layout.ts`는 AI 공간을 제외한 문서 영역을 main/renderer가 함께 계산하고, 실제 구분선(`SplitDivider.tsx`)은 확대된 틀 밖의 포털로 그린다. `setWorkspacePanel`은 검증된 호스트가 붙을 때만 쓰며 현재 앱은 예약하지 않는다. `main/workspace-ai/run-registry.ts`는 IPC에 등록하지 않은 기반 모델이다. 실제 어댑터·대화 보관·공용 패널 검증 전에는 기존 AI 패널을 끄지 않는다. 상세는 `docs/plans/workspace-ui-contracts.md`.
+- 새 분할 입구는 `split-menu.test.ts`·`tabbar-split-menu.test.ts`·`preload-split-menu.test.ts`, 공간/실행 격리는 `workspace-layout.test.ts`·`workspace-ai-run-registry.test.ts`, 설정/첫 안내 키보드는 `settings-keyboard.test.ts`·`onboarding.test.ts`가 검사한다. `e2e/workspace-layout-prototype.spec.ts`는 실제 구분선과 합성 네이티브 보기의 배치만 검사한다. 실제 편집기·모델·저장 검증을 대신하지 않는다.
+
 - 실행: `npm run test -w @genoffice/shell`(또는 이 폴더에서 `npx vitest run`), `npm run typecheck -w @genoffice/shell`. 환경은 `node`다.
 - `src/main/index.ts`는 실행 중인 Electron이 있어야 불러올 수 있다. 그래서 배선은 소스 글자를 읽어 고정한다(`tests/subscription-lifetime.test.ts`, `tests/main-locale-tables.test.ts`). 종료 처리나 인라인 사전의 모양을 바꾸면 이 테스트들이 깨진다. 로직은 Electron을 import하지 않는 모듈로 빼서 테스트한다(`settings-ai.ts`, `kb-ask-connection.ts`, `app-routing.ts`).
 - 닫은 렌더러 끝내기는 `tests/renderer-disposal.test.ts`, 크래시 기록의 칸과 크기 상한은 `tests/crash-log.test.ts`, 기록·알림·다시 열기는 `tests/crash-watch.test.ts`가 본다.

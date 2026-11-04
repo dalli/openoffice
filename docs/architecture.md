@@ -208,6 +208,12 @@ AI 창(아홉 편집기, 홈 AI 질문)
 
 한 창의 탭 관리자가 두 칸(split)을 안다. 칸에 들어간 탭은 각각 지금의 편집기 화면(WebContentsView)이고, 칸의 자리·크기·초점은 탭 관리자가 계산한다(`apps/shell/src/main/split-layout.ts`의 순수 계산, 구분선 틈 6px). 끌어다 놓기와 탭 메뉴의 결과는 `SplitDropIntent` 여섯 갈래(생성·교체·방향 전환·초점·뒤집기·무동작)로만 표현되고, 실행은 `TabManager`가 한다. 초점이 바뀌면 껍데기가 각 칸 화면에 역할(`focus`/`secondary`)을 알리고(`app:split-role-changed`), 비포커스 칸의 AI 패널은 강제로 레일로 접힌다 — 패널은 마운트된 채 남아 대화와 진행 중 실행이 살아 있다. 나눔 상태는 껍데기 설정 파일(`app-settings.json`)에 남아, 파일 지정 없는 시작에서 두 문서가 디스크에 있으면 다시 열어 복원한다. 같은 문서가 두 칸에 있을 때의 저장 확인은 편집기 저장 길목의 공용 조각(`packages/electron-utils/src/save-conflict.ts`)이 맡는다: 그 경로가 앱 안 다른 곳에도 열려 있고 디스크가 그사이 바뀌었을 때만 직접 저장은 확인을 받고 자동 저장은 조용히 미룬다.
 
+탭 표시줄의 화면 나누기도 같은 탭 관리자로 연결된다(`split-menu.ts`, `tabs:show-split-menu`). 네이티브 메뉴라 편집기 보기 위에 표시되며 좌우·위아래·해제와 칸별 문서 교체를 제공한다. 문서 영역은 main과 renderer가 `shared/workspace-layout.ts`로 같은 좌표에서 계산한다. 구분선은 확대된 `.app-frame` 밖의 포털로 그려 UI 배율이 좌표에 두 번 적용되지 않게 한다. 작은 창에서 칸의 최소 크기에 맞추는 표시 비율과 저장한 분할 비율을 구분한다.
+
+### 공용 AI 개편의 기반 (결정 0107, 구현 중)
+
+공용 패널 공간은 `TabManager.setWorkspacePanel`로 예약할 수 있지만, **현재 앱에서는 호스트가 붙지 않아 예약하지 않는다.** 합성 문서의 네이티브 보기와 로컬 가짜 응답으로 배치 시제품을 검사한다. `shared/workspace-ai-api.ts`와 `main/workspace-ai/run-registry.ts`도 아직 IPC에 등록하지 않은 모델이다. 대화·실행·문서 세대·선택·프로젝트를 고정하고 참고의 쓰기를 거절하며, 창마다 실행 하나와 대기열을 다룬다. 실제 도구 실행·모델 호출·대화 보관은 연결하지 않았다. 편집기 어댑터와 현재 자료의 가리기 읽기를 검증한 뒤 공용 패널을 켜야 한다([연결 계약](plans/workspace-ui-contracts.md)). 그때까지 위 결정 0037의 편집기 패널 배선은 유효하다.
+
 ## 켤 때의 흐름과 갑자기 꺼진 뒤 (결정 0061)
 
 복구 사본은 편집기마다 쓰고, 켤 때의 판단과 되살리기는 껍데기 앱이 한다. 둘은 `packages/electron-utils`의 공용 복구 저장소(`recovery-store.ts`)와 편집기 약속(`recovery-contract.ts`, `RecoveryEditorContract`)으로 만난다. 편집기 뒷단은 자기 모듈이 실릴 때 약속을 등록하고, 껍데기 앱은 종류로 찾아 부른다.
