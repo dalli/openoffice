@@ -5,6 +5,7 @@ import type { TabsApi, TabSummary } from '../../shared/tabs-api'
 import { TEAR_OFF_SLACK, insertionIndexForX, isBeyondBand } from '../../shared/tab-drag-geometry'
 import { notifyFilesChanged } from './file-events'
 import { productName } from '@genoffice/i18n'
+import { aiSubscriptionText } from '@genoffice/ui'
 import { useI18n } from './locale'
 import { workspaceSplitText } from './i18n/strings-workspace-split'
 import iconDocx from './assets/file-docx.svg'
@@ -119,9 +120,10 @@ export function renamedFileName(currentPath: string, typedName: string): string 
 interface TabBarProps {
   /** the window's two-pane split; its tab ids decide the pane markers */
   split: SplitViewState | null
+  workspacePanel?: { open: boolean; toggle(): void } | undefined
 }
 
-export function TabBar({ split }: TabBarProps) {
+export function TabBar({ split, workspacePanel }: TabBarProps) {
   const { t, lang } = useI18n()
   const [tabs, setTabs] = useState<TabSummary[]>([])
   const [splitMenuOpen, setSplitMenuOpen] = useState(false)
@@ -643,6 +645,18 @@ export function TabBar({ split }: TabBarProps) {
           <path d="m3 4.5 3 3 3-3" stroke="currentColor" strokeWidth="1.5" />
         </svg>
       </button>
+      {workspacePanel && (
+        <button
+          type="button"
+          className="tab-split-btn"
+          aria-label={aiSubscriptionText(lang, 'aiAssistant')}
+          title={aiSubscriptionText(lang, 'aiAssistant')}
+          aria-pressed={workspacePanel.open}
+          onClick={workspacePanel.toggle}
+        >
+          {aiSubscriptionText(lang, 'aiAssistant')}
+        </button>
+      )}
       <button
         className="tab-overflow-btn"
         title={t('tabList')}

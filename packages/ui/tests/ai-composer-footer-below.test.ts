@@ -37,6 +37,22 @@ function html(extra: Record<string, unknown>): string {
 }
 
 describe('AiComposer footerBelow', () => {
+  it('keeps drafting and stopping available while a document binding blocks send and queue', () => {
+    const onSend = vi.fn()
+    const onQueue = vi.fn()
+    const onStop = vi.fn()
+    html({ sendDisabled: true, onSend, onQueue, onStop })
+    const input = host.querySelector('textarea')!
+    expect(input.disabled).toBe(false)
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="Send"]')!.disabled).toBe(true)
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(onSend).not.toHaveBeenCalled()
+    html({ sendDisabled: true, busy: true, onSend, onQueue, onStop })
+    act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(onQueue).not.toHaveBeenCalled()
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="Stop"]')!.click())
+    expect(onStop).toHaveBeenCalledOnce()
+  })
   it('renders exactly the input box when the prop is absent', () => {
     const without = html({})
     expect(host.children).toHaveLength(1)

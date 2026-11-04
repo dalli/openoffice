@@ -48,6 +48,22 @@ afterEach(async () => {
 })
 
 describe('the tab-strip split entry', () => {
+  it('offers the shared AI toggle only when a guarded panel host is mounted', async () => {
+    expect(container.querySelector('[aria-label="AI Assistant"]')).toBeNull()
+    const toggle = vi.fn()
+    await act(async () =>
+      root.render(
+        createElement(LocaleProvider, {
+          initial: 'en',
+          children: createElement(TabBar, { split: null, workspacePanel: { open: false, toggle } }),
+        }),
+      ),
+    )
+    const button = container.querySelector<HTMLButtonElement>('[aria-label="AI Assistant"]')!
+    expect(button.getAttribute('aria-pressed')).toBe('false')
+    await act(async () => button.click())
+    expect(toggle).toHaveBeenCalledOnce()
+  })
   it.each(['ArrowDown', 'ArrowUp'])('opens its native keyboard menu with %s', async (key) => {
     const button = container.querySelector<HTMLButtonElement>('.tab-split-btn')!
     vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ left: 78, bottom: 40 } as DOMRect)

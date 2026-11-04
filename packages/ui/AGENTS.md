@@ -80,6 +80,8 @@
 
 ## 테스트
 
+- `AiComposer.sendDisabled`는 글쓰기와 중단을 허용한 채 전송 버튼·Enter 전송·실행 중 Enter 대기열 추가만 막는다. 문서 바인딩을 기다리거나 대상이 닫혔을 때 쓴다. 기본값은 꺼짐이며 `ai-composer-footer-below.test.ts`가 검사한다.
+
 - 모달의 공용 키보드 처리는 `modal-keys.ts`의 `useModalKeys`·`trapTab`이다. 숨김·비활성·inert 컨트롤을 건너뛰고, 중첩 모달은 가장 안쪽 창이 초점을 소유한다. 설정·첫 실행 안내는 닫힌 뒤 호출 위치로 초점을 돌려준다. `isEditingKeyTarget`과 IME 검사는 입력의 Enter·화살표를 안내 이동으로 가로채지 않게 한다. 모델 선택기의 현재 항목 초점·↑↓·Home·End·Enter·Escape·복귀는 `ai-model-picker-keyboard.test.ts`, 모달의 수명과 초점은 `modal-keys-focus.test.ts`에서 검사한다.
 
 - 실행: `npm run test -w @genoffice/ui`(또는 이 폴더에서 `npx vitest run`), `npm run typecheck -w @genoffice/ui`. Windows에서 전부 통과한다.

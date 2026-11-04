@@ -27,6 +27,7 @@ export function AiComposer({
   hintBusy,
   hintIdleTitle,
   sendLabel,
+  sendDisabled = false,
   stopLabel,
   ariaLabel,
   header,
@@ -55,6 +56,8 @@ export function AiComposer({
   readonly hintBusy: string
   readonly hintIdleTitle?: string | undefined
   readonly sendLabel: string
+  /** Keep drafting available while the host is waiting for a valid document binding. */
+  readonly sendDisabled?: boolean | undefined
   readonly stopLabel: string
   readonly ariaLabel?: string | undefined
   /** content inside the box above the textarea (attachment chips, …) */
@@ -95,7 +98,7 @@ export function AiComposer({
 }): React.JSX.Element {
   const innerRef = useRef<HTMLTextAreaElement | null>(null)
   const ref = textareaRef ?? innerRef
-  const canSend = value.trim().length > 0 && !busy
+  const canSend = value.trim().length > 0 && !busy && !sendDisabled
   const { spellcheck } = useAiPanelPrefs()
   const picker = useComposerPickers({ skills, docs, value, onChange, textareaRef: ref })
 
@@ -141,7 +144,7 @@ export function AiComposer({
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault()
             if (canSend) onSend()
-            else if (busy && onQueue) onQueue()
+            else if (busy && onQueue && !sendDisabled) onQueue()
           } else if (e.key === 'Escape' && busy) {
             e.preventDefault()
             onStop()

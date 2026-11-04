@@ -73,7 +73,11 @@ import {
 import { rendererUrl, safeExternalUrl } from '@genoffice/electron-utils'
 import type { DocumentTabKind, OpenDocumentTab, TabKind, TabSummary } from '../shared/tabs-api'
 import { isSettledRect } from '../shared/tab-drag-geometry'
-import { workspaceLayout, type WorkspacePanelLayout } from '../shared/workspace-layout'
+import {
+  workspaceLayout,
+  type WorkspaceLayout,
+  type WorkspacePanelLayout,
+} from '../shared/workspace-layout'
 import type {
   SplitDropIntent,
   SplitOrientation,
@@ -354,22 +358,30 @@ export class TabManager {
   documentBounds(
     orientation: SplitOrientation | null = this.split?.orientation ?? null,
   ): Rectangle {
+    return this.workspaceBounds(orientation).documents
+  }
+
+  /** The opted-in shell host forwards this same layout to AppFrame and its panel. */
+  workspaceBounds(
+    orientation: SplitOrientation | null = this.split?.orientation ?? null,
+  ): WorkspaceLayout {
     const { width, height } = this.shellWindow.getContentBounds()
     return workspaceLayout(
       { width, height, uiScale: this.uiScale() },
-      this.workspacePanel,
+      this.coverTabId() === null ? this.workspacePanel : null,
       orientation,
-    ).documents
+    )
   }
 
   /**
    * Reserve panel space without changing any document or saved split ratio.
-   * Before opting in, the host must deliver documentBounds() to the renderer's
-   * divider viewport too. No production host is attached during this stage.
+   * The returned layout must be forwarded to AppFrame, including its divider.
+   * No default production host is attached during this stage.
    */
-  setWorkspacePanel(panel: Readonly<WorkspacePanelLayout> | null): void {
+  setWorkspacePanel(panel: Readonly<WorkspacePanelLayout> | null): WorkspaceLayout {
     this.workspacePanel = panel ? { ...panel } : null
     this.layout()
+    return this.workspaceBounds()
   }
 
   /** the tab whose view covers the whole window right now (HTML fullscreen / slides show) */

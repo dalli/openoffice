@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { SplitViewState } from '../../shared/split-view-api'
 import { useFirstConnectionNotice } from './FirstConnectionNotice'
 import { Home } from './Home'
@@ -8,10 +8,17 @@ import { SplitDivider } from './SplitDivider'
 import { TabBar } from './TabBar'
 import { useSubscriptionConnection } from './subscription-client'
 import { workspaceUiScale } from '../../shared/workspace-layout'
+import type { WorkspacePanelMount } from './workspace-ai/WorkspacePanel'
+
+const WorkspacePanel = lazy(() =>
+  import('./workspace-ai/WorkspacePanel').then((module) => ({ default: module.WorkspacePanel })),
+)
 
 interface AppFrameProps {
   /** resolved before first paint (main.tsx) so home never flashes under the overlay */
   initialOnboardingSeen: boolean
+  /** Installed only by a host with guarded services and a main-acknowledged panel reservation. */
+  workspace?: WorkspacePanelMount
 }
 
 /** The shell renderer's viewport: the same CSS px space the pane bounds use. */
@@ -58,11 +65,14 @@ function useSplitView(): SplitViewState | null {
   return split
 }
 
-export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
+export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
   const [homeActive, setHomeActive] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(!initialOnboardingSeen)
   const split = useSplitView()
   const viewport = useViewportSize()
+  const documentViewport = workspace
+    ? { ...viewport, documents: workspace.layout.documents }
+    : viewport
   // one live view of the subscription connection for the home screen, the
   // onboarding and the first-connection notice
   const connection = useSubscriptionConnection()
@@ -90,14 +100,33 @@ export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
 
   return (
     <div className="app-frame">
-      <TabBar split={split} />
+      <TabBar
+        split={split}
+        workspacePanel={
+          workspace
+            ? {
+                open: workspace.layout.panelMode === 'open',
+                toggle: () => workspace.setOpen(workspace.layout.panelMode !== 'open'),
+              }
+            : undefined
+        }
+      />
       {/* divider sits in the gap between the two pane views — the one slice of
        * the content area they do not cover. Home paints this document instead
        * (the panes are only hidden there, not closed), so no seam over it. */}
-      {split && !homeActive && <SplitDivider split={split} viewport={viewport} />}
+      {split && !homeActive && <SplitDivider split={split} viewport={documentViewport} />}
       {/* docs/sheets tabs render as WebContentsView children of this window, positioned
        * by the main process to cover this area — only Home paints its own content here. */}
-      <div className="app-frame-content" style={{ visibility: homeActive ? 'visible' : 'hidden' }}>
+      <div
+        className="app-frame-content"
+        style={{
+          visibility: homeActive ? 'visible' : 'hidden',
+          ...(workspace && {
+            marginLeft: workspace.layout.documents.x / workspaceUiScale(workspace.uiScale),
+            width: workspace.layout.documents.width / workspaceUiScale(workspace.uiScale),
+          }),
+        }}
+      >
         <Home
           connection={connection}
           aiSettings={notice.settings}
@@ -106,6 +135,11 @@ export function AppFrame({ initialOnboardingSeen }: AppFrameProps) {
           onNoticeAcknowledge={notice.acknowledge}
         />
       </div>
+      {workspace && (
+        <Suspense fallback={null}>
+          <WorkspacePanel mount={workspace} />
+        </Suspense>
+      )}
       {/* editor WebContentsViews paint above ALL shell DOM, so the overlay only
        * renders while the home tab is active — it comes back when home does */}
       {showOnboarding && homeActive && (
