@@ -8,7 +8,7 @@ Markdown 에디터다. 일반 `.md` 파일 위에서 TipTap 블록 편집기를 
 - 메인 프로세스(`src/main/markdown-main.ts`와 주변): 열기·저장, 문서가 소유한 자산 폴더 관리(`asset-lifecycle.ts`), 이미지 호스트 업로드(`image-host.ts`), 이미지 내보내기 세션(`image-export.ts`), PDF 인쇄(`print-pdf.ts`), 변환 임시 세션(`conversion-lifecycle.ts`), ODT 내보내기(`odt-export.ts`), PDF 편집기의 "노트에 넣기"를 받는 대기열(`note-append.ts`, 화면 쪽은 `src/renderer/note-append.ts`).
 - 공유 계약 `src/shared/`: IPC(`ipc.ts`의 `MARKDOWN_CHANNELS`), 열기 방식 판정(`text-mode.ts`), 원문 형식 보존(`source-text.ts`).
 - Markdown의 AI: 패널(`src/renderer/ai/AiPanel.tsx`), skill과 도구(`markdown-skill.ts`, `tools.ts`, `doc-writer.ts`, `search-skill.ts`), 막힌 실행과 이미지 도구 판정(`ai-connection.ts`), 연결 상태(`subscription-client.ts`), 가림 표시(`src/renderer/editor/redact.ts`).
-- 공용 작업 화면용 문서 어댑터(`src/renderer/ai/workspace-adapter.ts`): 기존 skill의 문서 맥락·블록·frontmatter 읽기와 `apply_ops`만 연결하는 렌더러 경계다. 전용 preload와 렌더러 호스트에 연결했으며 공용 패널이나 모델 실행에는 아직 연결하지 않았다. 원문 모드·편집기 교체·문서/메타데이터 변경·중단을 검사하고, 요청 당시의 실제 ProseMirror 선택을 보존한다. 잠깐 선택을 복원할 때 사람의 보이는 커서와 입력 서식은 원래 자리로 돌려놓는다. 이미지·긴 글 작성기·마인드맵·저장·네트워크 도구는 내놓지 않는다.
+- 공용 작업 화면용 문서 어댑터(`src/renderer/ai/workspace-adapter.ts`): 기존 skill의 문서 맥락·블록·frontmatter 읽기와 `apply_ops`만 연결하는 렌더러 경계다. 전용 preload와 렌더러 호스트에 연결했으며 공용 패널이나 모델 실행에는 아직 연결하지 않았다. 원문 모드·편집기 교체·문서/메타데이터 변경·중단을 검사하고, 요청 당시의 실제 ProseMirror 선택을 보존한다. 잠깐 선택을 복원할 때 사람의 보이는 커서와 입력 서식은 원래 자리로 돌려놓는다. PM 본문 변경뿐 아니라 frontmatter·원문 모드·다시 열기도 내용 없는 변경 알림으로 실행을 무효화한다. 이미지·긴 글 작성기·마인드맵·저장·네트워크 도구는 내놓지 않는다.
 
 ## 맡지 않는 것 (경계)
 
@@ -47,6 +47,8 @@ Markdown 에디터다. 일반 `.md` 파일 위에서 TipTap 블록 편집기를 
 - 복구 사본: 저장하지 않은 변경이 있으면 화면이 약 30초마다 저장할 때 쓸 글자 그대로를 뒷단에 넘기고(`src/renderer/recovery-copy.ts`, 자동 저장 스위치와 무관), 뒷단이 공용 저장소로 `<userData>/markdown-autosave`에 둔다(`src/main/recovery.ts`). 원본 파일과 사용자 폴더에는 쓰지 않는다(제목 없는 문서 포함). 저장(자동 저장·다른 이름·MCP 포함)은 사본을 지우고, "저장 안 함"과 MCP의 저장 없이 닫기는 `dontSave`로, 깨끗하게 닫힌 탭은 자기가 쓴 사본만 지운다. 화면이 죽은 탭과 앱이 끝나는 중의 닫기는 지우지 않는다. 사본이 있는 파일을 열면 내용을 읽기 전에 `recoveryOpen`이 공용 물음(Esc는 되살리기)을 거치고, 되살린 글은 원래 경로를 저장 대상으로 둔 채 "바뀜" 상태로 열린다. 껍데기 앱은 `markdownRecoveryEditor`(약속), `markdownRecoveryIdentity`, `setMarkdownRecoveryTitleSource`를 쓴다. `recovery.ts`와 `recovery-copy.ts`는 HTML 편집기의 같은 이름 파일과 내용이 같다.
 - 문자열은 `src/renderer/i18n/strings.ts` 한 파일에 21개 언어가 있고 `zh`가 키 집합을 정한다. 구독 연결 문장과 AI 진입 이름은 `@genoffice/ui`의 것을 쓴다.
 - 제목 개요 창(`OutlinePane.tsx`)은 열림 여부를 `mdapp.showOutline`에 기억한다. 제목이 없는 문서에서도 열 수 있고(빈 상태 안내), Ctrl+Shift+O로 여닫는다. 파일을 열 때 `collectOutline`으로 한 번 채워 두어 첫 편집 전에도 제목 목록이 보인다.
+
+공용 실행의 전체 되돌리기는 `AiPanel`이 기존 `getSnapshot/restoreSnapshot`을 작업 화면 어댑터에 넘긴다. 본문과 frontmatter를 함께 편집기 안에 보관하며 IPC로 내보내지 않는다. 같은 문서 버전에서 실행이 끝난 뒤 한 번만 복원하고, 원문 모드·수동 변경·읽기 전용·문서 교체는 거절한다.
 
 ## 테스트
 

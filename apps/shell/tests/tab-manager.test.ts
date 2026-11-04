@@ -288,6 +288,25 @@ beforeEach(() => {
 })
 
 describe('initial state', () => {
+  it('owns one workspace controller per increasing panel generation and disposes it on reload', async () => {
+    const panelOn = vi.fn()
+    Object.assign(shellWindow, {
+      id: 1,
+      removeListener: vi.fn(),
+      webContents: { id: 100, on: panelOn, removeListener: vi.fn() },
+    })
+    const first = manager.workspaceAiForPanel(1)
+    expect(manager.workspaceAiForPanel(1)).toBe(first)
+    first.dispose()
+    expect(() => manager.workspaceAiForPanel(1)).toThrow('stale panel generation')
+    const next = manager.workspaceAiForPanel(2)
+    expect(() => manager.workspaceAiForPanel(1)).toThrow('stale panel generation')
+    const reload = panelOn.mock.calls
+      .filter(([event]) => event === 'did-start-navigation')
+      .at(-1)![1]
+    reload({}, 'reload', false, true)
+    await expect(next.capture('home')).rejects.toMatchObject({ kind: 'panel-closed' })
+  })
   it('starts with only the non-closable, active Home tab', () => {
     expect(manager.list()).toEqual([
       { id: 'home', kind: 'home', title: 'IeumOffice', closable: false, active: true },

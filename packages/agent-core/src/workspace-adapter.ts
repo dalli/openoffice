@@ -63,6 +63,7 @@ export interface WorkspacePreparedDocument {
   readonly systemPrompt: string
   readonly context: string
   readonly tools: readonly AgentToolDef[]
+  readonly rollbackId?: string | null
   execute(
     call: AgentToolCall,
     signal?: AbortSignal,
@@ -73,6 +74,9 @@ export interface WorkspacePreparedDocument {
 
 export interface WorkspaceDocumentAdapter {
   readonly toolAccess: Readonly<Record<string, 'read' | 'write'>>
+  readonly masking: 'applied' | 'unsupported'
+  readonly observesChanges: boolean
+  subscribeChanges(handler: () => void): () => void
   capture(signal?: AbortSignal): Promise<WorkspaceAdapterState>
   read(
     state: WorkspaceAdapterState,
@@ -83,6 +87,11 @@ export interface WorkspaceDocumentAdapter {
     request: WorkspacePrepareRequest,
     signal?: AbortSignal,
   ): Promise<WorkspacePreparedDocument>
+  rollback?(
+    id: string,
+    state: WorkspaceAdapterState,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceAdapterState>
   dispose(): void
 }
 
@@ -99,8 +108,12 @@ export interface WorkspaceDocumentAdapterDeps {
   createSkill(state: WorkspaceAdapterState, signal?: AbortSignal): AgentSkill | Promise<AgentSkill>
   /** Explicit local document capabilities; unlisted tools never cross this boundary. */
   readonly toolAccess: Readonly<Record<string, 'read' | 'write'>>
+  /** Metadata-only invalidation, including edits outside the document body. */
+  subscribeChanges?(handler: () => void): () => void
   /** Original editor undo/change-tracking hook, once before the first write. */
   beforeFirstWrite?(signal?: AbortSignal): void | Promise<void>
+  /** Editor-local immutable snapshot. Restore must synchronously validate/apply, with no async gap. */
+  rollback?: { capture(): unknown; restore(snapshot: unknown): void }
   dispose?(): void
 }
 
@@ -130,6 +143,8 @@ export function createWorkspaceDocumentAdapter(
   let active = false
   let sequence = 0
   let releaseActive: (() => void) | null = null
+  const subscriptions = new Set<() => void>()
+  const rollbacks = new Map<string, { snapshot: unknown; state: WorkspaceAdapterState }>()
   const live = (): void => {
     if (disposed) fail('disposed')
   }
@@ -157,7 +172,37 @@ export function createWorkspaceDocumentAdapter(
   }
   return {
     toolAccess,
+    masking,
+    observesChanges: !!deps.subscribeChanges,
+    subscribeChanges(handler) {
+      live()
+      const off = deps.subscribeChanges?.(handler) ?? (() => {})
+      const unsubscribe = () => {
+        if (!subscriptions.delete(unsubscribe)) return
+        off()
+      }
+      subscriptions.add(unsubscribe)
+      return unsubscribe
+    },
     capture,
+    async rollback(id, state, signal) {
+      live()
+      if (active) fail('busy')
+      const saved = rollbacks.get(id)
+      if (!saved || !deps.rollback || !sameDocument(saved.state, state)) fail('released')
+      active = true
+      try {
+        const current = await assertCurrent(state, signal)
+        if (current.readOnly) fail('read-only')
+        live()
+        checkAbort(signal)
+        deps.rollback!.restore(saved!.snapshot)
+        rollbacks.delete(id)
+        return await capture(signal)
+      } finally {
+        active = false
+      }
+    },
     async read(state, request, signal) {
       if (request.scope !== 'document' && request.scope !== 'selection') fail('unsupported-read')
       if (request.scope === 'selection' && !state.selectionId) fail('stale-selection')
@@ -214,6 +259,8 @@ export function createWorkspaceDocumentAdapter(
         const tools = structuredClone(skill.tools.filter((tool) => allowed(tool.name)))
         if (new Set(tools.map((tool) => tool.name)).size !== tools.length) fail('invalid-call')
         let undoCaptured = false
+        let rollbackSnapshot: unknown
+        let rollbackId: string | null = null
         const calls = new Set<string>()
         const ready = (): void => {
           live()
@@ -224,6 +271,9 @@ export function createWorkspaceDocumentAdapter(
         return {
           id: `workspace-document-${adapterId}-${++sequence}`,
           runId,
+          get rollbackId() {
+            return rollbackId
+          },
           get state() {
             return Object.freeze({ ...state })
           },
@@ -266,6 +316,7 @@ export function createWorkspaceDocumentAdapter(
                   await deps.beforeFirstWrite?.(operationSignal)
                   undoCaptured = true
                   if ((await assertCurrent(state, operationSignal)).readOnly) fail('read-only')
+                  rollbackSnapshot = deps.rollback?.capture()
                 }
               }
               ready()
@@ -282,6 +333,11 @@ export function createWorkspaceDocumentAdapter(
               )
                 fail('stale-document')
               state = Object.freeze({ ...after, selectionId: state.selectionId })
+              if (result.mutated && deps.rollback) {
+                rollbackId ??= crypto.randomUUID()
+                rollbacks.set(rollbackId, { snapshot: rollbackSnapshot, state })
+                while (rollbacks.size > 16) rollbacks.delete(rollbacks.keys().next().value!)
+              }
               return { result, state }
             } catch (error) {
               release()
@@ -293,9 +349,19 @@ export function createWorkspaceDocumentAdapter(
           },
           async verifyResponse(text, executed) {
             ready()
-            await assertCurrent(state, combined)
-            ready()
-            return skill.verifyResponse?.(text, executed) ?? null
+            if (executing) fail('busy')
+            executing = true
+            try {
+              await assertCurrent(state, combined)
+              ready()
+              const result = (await skill.verifyResponse?.(text, executed)) ?? null
+              await assertCurrent(state, combined)
+              ready()
+              return result
+            } finally {
+              executing = false
+              if (released) active = false
+            }
           },
           release,
         }
@@ -311,6 +377,8 @@ export function createWorkspaceDocumentAdapter(
       if (disposed) return
       disposed = true
       releaseActive?.()
+      rollbacks.clear()
+      for (const unsubscribe of [...subscriptions]) unsubscribe()
       deps.dispose?.()
     },
   }

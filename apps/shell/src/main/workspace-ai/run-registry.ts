@@ -61,7 +61,7 @@ export function sameWorkspaceDocument(
 }
 
 /**
- * Trusted main-process state, intentionally not wired to IPC yet. One active run
+ * Trusted main-process state; the execution controller owns editor RPC. One active run
  * per window; FIFO keeps each conversation's queued snapshots in order too.
  * The caller starts a queued run explicitly after applying the existing send gate.
  */
@@ -332,6 +332,17 @@ export class WorkspaceAiRunRegistry {
     runId: string,
     bindingId: number,
   ): WorkspaceAiResult<void> {
+    return this.stopRun(owner, conversationId, runId, bindingId, 'cancelled')
+  }
+
+  /** Trusted host failures stop exactly the bound run, including an in-flight tool. */
+  stopRun(
+    owner: WorkspaceAiOwner,
+    conversationId: string,
+    runId: string,
+    bindingId: number,
+    reason: WorkspaceAiRejection,
+  ): WorkspaceAiResult<void> {
     if (!sameOwner(owner, this.owner)) return fail('wrong-owner')
     const run = this.runs.get(runId)
     if (
@@ -342,7 +353,7 @@ export class WorkspaceAiRunRegistry {
       return fail('run-not-active')
     }
     if (run.state.status !== 'running' && run.state.status !== 'queued') return fail('run-finished')
-    this.stop(run, 'cancelled')
+    this.stop(run, reason)
     return ok(undefined)
   }
 

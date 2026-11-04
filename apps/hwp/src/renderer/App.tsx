@@ -19,6 +19,7 @@ import {
   FILE_COMMAND_EVENT,
   MEMO_NOT_COPIED_EVENT,
   MEMO_REMOVED_EVENT,
+  WORKSPACE_CHANGED_EVENT,
 } from '../../studio-plugin/agent-plugin.mjs'
 import blankHwpUrl from './assets/blank.hwp?url'
 import { useI18n, type StringKey } from './i18n/locale'
@@ -140,6 +141,12 @@ export default function App() {
   /** the same format for the screen: the check panel passes it to the rules */
   const [docFormat, setDocFormat] = useState<HwpFormat>('hwp')
   const [phase, setPhase] = useState<Phase>('booting')
+  const workspaceEvents = useRef(new EventTarget())
+  const subscribeWorkspaceChanges = useCallback((handler: () => void) => {
+    const events = workspaceEvents.current
+    events.addEventListener('changed', handler)
+    return () => events.removeEventListener('changed', handler)
+  }, [])
   /** Ctrl+F5: the document alone in fullscreen, with the editor's own chrome hidden */
   const [presenting, setPresenting] = useState(false)
   const presentingRef = useRef(false)
@@ -341,6 +348,8 @@ export default function App() {
       setDocTick((tick) => tick + 1)
     }
     frame?.addEventListener(DIRTY_EVENT, onChange)
+    const onWorkspaceChange = () => workspaceEvents.current.dispatchEvent(new Event('changed'))
+    frame?.addEventListener(WORKSPACE_CHANGED_EVENT, onWorkspaceChange)
     frame?.addEventListener(MEMO_REMOVED_EVENT, onMemoEvent)
     frame?.addEventListener(MEMO_NOT_COPIED_EVENT, onMemoEvent)
     // an edit before the plugin is up has no event: ask once it is
@@ -353,6 +362,7 @@ export default function App() {
       clearInterval(timer)
       if (memoTick) clearTimeout(memoTick)
       frame?.removeEventListener(DIRTY_EVENT, onChange)
+      frame?.removeEventListener(WORKSPACE_CHANGED_EVENT, onWorkspaceChange)
       frame?.removeEventListener(MEMO_REMOVED_EVENT, onMemoEvent)
       frame?.removeEventListener(MEMO_NOT_COPIED_EVENT, onMemoEvent)
     }
@@ -909,6 +919,7 @@ export default function App() {
             setOpen={setAiOpen}
             bridge={agentBridge}
             filePath={filePath}
+            subscribeDocumentChanges={subscribeWorkspaceChanges}
             templateDocument={templateDocument}
             prefill={aiPrefill}
           />

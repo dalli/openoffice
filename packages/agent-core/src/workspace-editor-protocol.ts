@@ -13,7 +13,22 @@ export const WORKSPACE_EDITOR_CHANNELS = {
   request: 'workspace-ai:editor-request',
   reply: 'workspace-ai:editor-reply',
   cancel: 'workspace-ai:editor-cancel',
+  event: 'workspace-ai:editor-event',
 } as const
+
+export interface WorkspaceEditorDescription {
+  readonly hostId: string
+  readonly state: WorkspaceAdapterState
+  readonly toolAccess: Readonly<Record<string, 'read' | 'write'>>
+  readonly masking: 'applied' | 'unsupported'
+  readonly observesChanges: boolean
+}
+
+/** Contains no document text or paths. A new host invalidates old prepared sessions. */
+export interface WorkspaceEditorEvent {
+  readonly hostId: string
+  readonly kind: 'ready' | 'changed' | 'disposed'
+}
 
 export interface WorkspaceEditorSession {
   readonly id: string
@@ -27,6 +42,12 @@ export interface WorkspaceEditorSession {
 
 export type WorkspaceEditorOperation =
   | { readonly kind: 'capture' }
+  | {
+      readonly kind: 'rollback'
+      readonly rollbackId: string
+      readonly state: WorkspaceAdapterState
+    }
+  | { readonly kind: 'describe' }
   | {
       readonly kind: 'read'
       readonly state: WorkspaceAdapterState
@@ -47,6 +68,7 @@ export type WorkspaceEditorOperation =
       readonly executed: readonly ExecutedToolCall[]
     }
   | { readonly kind: 'release'; readonly sessionId: string; readonly runId: string }
+  | { readonly kind: 'settle'; readonly runId: string }
 
 export interface WorkspaceEditorRequest {
   readonly id: string
@@ -54,12 +76,15 @@ export interface WorkspaceEditorRequest {
 }
 
 export interface WorkspaceEditorValues {
+  describe: WorkspaceEditorDescription
   capture: WorkspaceAdapterState
   read: WorkspaceReadSnapshot
   prepare: WorkspaceEditorSession
-  execute: { result: ToolExecution; state: WorkspaceAdapterState }
+  execute: { result: ToolExecution; state: WorkspaceAdapterState; rollbackId?: string | null }
+  rollback: WorkspaceAdapterState
   verify: string | null
   release: null
+  settle: null
 }
 
 export type WorkspaceEditorReply =
@@ -78,6 +103,7 @@ export interface WorkspaceEditorPort {
   onRequest(handler: (request: WorkspaceEditorRequest) => void): () => void
   onCancel(handler: (id: string) => void): () => void
   reply(reply: WorkspaceEditorReply): void
+  event(event: WorkspaceEditorEvent): void
 }
 
 /** Structural Electron subset keeps this entry point safe in sandboxed preloads. */
@@ -99,6 +125,7 @@ export function workspaceEditorPort(ipc: EditorIpc): WorkspaceEditorPort {
     onRequest: (handler) => subscribe(WORKSPACE_EDITOR_CHANNELS.request, handler),
     onCancel: (handler) => subscribe(WORKSPACE_EDITOR_CHANNELS.cancel, handler),
     reply: (reply) => ipc.send(WORKSPACE_EDITOR_CHANNELS.reply, reply),
+    event: (event) => ipc.send(WORKSPACE_EDITOR_CHANNELS.event, event),
   }
 }
 

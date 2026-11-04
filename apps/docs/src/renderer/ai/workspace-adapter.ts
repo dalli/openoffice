@@ -14,6 +14,7 @@ import { getSelectionScope, type AiTrack, type NumIds, type SelectionScope } fro
 import { isTrackedDeleted, liveText } from './doc-utils'
 import { redactTextBetween } from './redact-view'
 import { REDACT_MARK, sanitizeLabel } from './redact'
+import { captureRollbackSnapshot, restoreRollbackSnapshot } from './rollback-snapshot'
 
 /** Body-only capabilities; media, network, files and app-owned side stores stay outside this adapter. */
 export const DOCS_WORKSPACE_TOOL_ACCESS = {
@@ -97,12 +98,14 @@ export function createDocsWorkspaceAdapter(
   let selectionSequence = 0
   let prepareFirstWrite: ((signal?: AbortSignal) => void | Promise<void>) | null = null
   const selections = new Map<string, SelectionSnapshot>()
+  const changes = new Set<() => void>()
 
   const onTransaction = ({ transaction }: { transaction: Transaction }): void => {
     if (!transaction.docChanged) return
     revision++
     lastDoc = attached?.state.doc ?? null
     selections.clear()
+    for (const notify of changes) notify()
   }
   const current = (): { editor: Editor; instanceId: string; revision: string } => {
     const editor = deps.getEditor()
@@ -150,6 +153,12 @@ export function createDocsWorkspaceAdapter(
 
   return createWorkspaceDocumentAdapter({
     masking: 'applied',
+    subscribeChanges(handler) {
+      changes.add(handler)
+      return () => {
+        changes.delete(handler)
+      }
+    },
     getState() {
       const live = current()
       const scope = getSelectionScope(live.editor)
@@ -305,6 +314,10 @@ export function createDocsWorkspaceAdapter(
       } satisfies AgentSkill
     },
     toolAccess: DOCS_WORKSPACE_TOOL_ACCESS,
+    rollback: {
+      capture: () => captureRollbackSnapshot(current().editor),
+      restore: (snapshot) => restoreRollbackSnapshot(current().editor, snapshot as ProseMirrorNode),
+    },
     beforeFirstWrite: (signal) => {
       if (!prepareFirstWrite) throw new WorkspaceAdapterError('not-ready')
       return prepareFirstWrite(signal)

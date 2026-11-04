@@ -210,6 +210,7 @@ const MODEL_BRIDGE: AiModelPickerBridge = {
 
 export function AiPanel({
   bridge,
+  subscribeDocumentChanges,
   filePath,
   onCollapse,
   templateDocument,
@@ -218,6 +219,7 @@ export function AiPanel({
 }: {
   /** the document operations of the open editor */
   bridge: AgentBridge
+  subscribeDocumentChanges?(handler: () => void): () => void
   /** the file of the open document: the conversation is kept with it */
   filePath: string | null
   onCollapse: () => void
@@ -878,6 +880,7 @@ export function AiPanel({
     return hostWorkspaceEditor(
       port,
       createHwpWorkspaceAdapter({
+        subscribeChanges: subscribeDocumentChanges,
         bridge: new Proxy({} as AgentBridge, {
           get: (_target, method: keyof AgentBridge) => bridgeRef.current[method],
         }),
@@ -898,7 +901,7 @@ export function AiPanel({
       }),
       () => loopRef.current?.busy === true,
     )
-  }, [])
+  }, [subscribeDocumentChanges])
 
   useEffect(() => {
     if (stickToBottomRef.current) {

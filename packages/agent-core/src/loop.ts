@@ -519,6 +519,7 @@ export class AgentLoop<TSnapshot = unknown> {
   private executedCalls: ExecutedToolCall[] = []
   /** verifyResponse may force one extra corrective turn per run — never more */
   private verifyRetryUsed = false
+  private verifyingGeneration: number | null = null
   /** user message of the in-flight run; a failed run rolls it (and everything after) back out of history */
   private runUserMsg: AgentMessage | null = null
   /** usage the provider reported for the turn now streaming (null until it reports) */
@@ -874,6 +875,23 @@ export class AgentLoop<TSnapshot = unknown> {
     this.turnUsage = null
     // abort lets long tools mid-execution (internal LLM loops etc.) stop promptly
     this.abortController?.abort()
+    // The transport has already delivered onDone while an editor verification waits.
+    // Finalize here: a second transport onDone is deliberately ignored by the turn guard.
+    if (this.verifyingGeneration === this.generation) {
+      this.generation++
+      this.verifyingGeneration = null
+      this.running = false
+      this.dropTurnLimitNote()
+      this.history.push({ role: 'assistant', text: this.turnText || COMPLETED_VIA_TOOLS_TEXT })
+      this.runUserMsg = null
+      this.handle?.cancel()
+      this.options.events?.onDone?.({
+        text: this.turnText,
+        cancelled: true,
+        turnLimit: this.finalizing,
+      })
+      return
+    }
     // Waiting out a retry backoff: finalize here. A run that already committed
     // tool turns (or showed text) ends like a mid-stream cancel; one that
     // produced nothing is rolled back instead of recording a placeholder reply
@@ -901,6 +919,7 @@ export class AgentLoop<TSnapshot = unknown> {
   /** drop the conversation (e.g. when a different document is opened) */
   reset(): void {
     this.generation++
+    this.verifyingGeneration = null
     this.clearRetryTimer()
     this.abortController?.abort()
     this.handle?.cancel()
@@ -961,7 +980,9 @@ export class AgentLoop<TSnapshot = unknown> {
    * guarantee as the tools-getter guard in startTurn().
    */
   private settleTurn(): void {
+    const generation = this.generation
     void this.finishTurn().catch((err: unknown) => {
+      if (generation !== this.generation || !this.running) return
       this.failRun(err instanceof Error ? err.message : String(err))
     })
   }
@@ -1137,10 +1158,20 @@ export class AgentLoop<TSnapshot = unknown> {
     if (toolCalls.length === 0 && !this.cancelled && !this.finalizing) {
       // snapshot copy: the live array keeps growing if the corrective turn
       // runs more tools, and the hook must see the state at check time
-      const correction =
+      const generation = this.generation
+      let correction =
         !this.verifyRetryUsed && this.turnText && skill.verifyResponse
           ? skill.verifyResponse(this.turnText, [...this.executedCalls])
           : null
+      if (correction && typeof correction !== 'string') {
+        this.verifyingGeneration = generation
+        try {
+          correction = await correction
+        } finally {
+          if (this.verifyingGeneration === generation) this.verifyingGeneration = null
+        }
+        if (generation !== this.generation || !this.running || this.cancelled) return
+      }
       if (correction) {
         this.verifyRetryUsed = true
         this.history.push({ role: 'assistant', text: this.turnText })

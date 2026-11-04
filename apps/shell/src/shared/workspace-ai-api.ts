@@ -1,6 +1,6 @@
 import type { DocumentTabKind } from './tabs-api'
 
-/** Internal contracts only. No workspace IPC is registered until editor adapters are verified. */
+/** Main-owned run contracts. The shared panel API is not registered yet. */
 export interface WorkspaceAiOwner {
   readonly windowId: number
   readonly panelContentsId: number
@@ -119,6 +119,8 @@ export type WorkspaceAiRejection =
   | 'document-closed'
   | 'editor-replaced'
   | 'panel-closed'
+  | 'editor-error'
+  | 'unsupported-read'
 
 export type WorkspaceAiResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -139,5 +141,9 @@ export interface WorkspaceAiStoppedRun {
 export type WorkspaceConversationOrigin =
   | { readonly kind: 'legacy-document'; readonly projectId: string; readonly chatId: string }
   | { readonly kind: 'project'; readonly projectId: string; readonly chatId: string }
-  | { readonly kind: 'window-memory'; readonly windowSessionId: string }
+  | {
+      readonly kind: 'window-memory'
+      readonly windowSessionId: string
+      readonly conversationId: string
+    }
   | { readonly kind: 'workspace'; readonly conversationId: string }

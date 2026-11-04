@@ -36,7 +36,10 @@ export interface AgentSkill {
    * accept the reply. The loop applies the correction at most once per run,
    * so a detector false-positive costs one extra turn and cannot loop.
    */
-  verifyResponse?(finalText: string, executed: readonly ExecutedToolCall[]): string | null
+  verifyResponse?(
+    finalText: string,
+    executed: readonly ExecutedToolCall[],
+  ): string | null | Promise<string | null>
 }
 
 /**
@@ -77,11 +80,17 @@ export function composeSkills(id: string, intro: string, skills: AgentSkill[]): 
       return skill.executeTool(call, signal)
     },
     verifyResponse: (finalText, executed) => {
-      for (const skill of skills) {
-        const correction = skill.verifyResponse?.(finalText, executed)
-        if (correction) return correction
+      const check = (index: number): string | null | Promise<string | null> => {
+        for (let i = index; i < skills.length; i++) {
+          const correction = skills[i]!.verifyResponse?.(finalText, executed)
+          if (correction && typeof correction !== 'string') {
+            return correction.then((text) => text || check(i + 1))
+          }
+          if (correction) return correction
+        }
+        return null
       }
-      return null
+      return check(0)
     },
   }
 }

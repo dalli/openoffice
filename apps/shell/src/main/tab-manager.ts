@@ -95,6 +95,7 @@ import { queueConvertedContent } from './generate/converted-tab'
 import { releaseClosedRenderer } from './renderer-disposal'
 import type { SessionStripState } from './session-record'
 import { WorkspaceEditorConnection } from './workspace-ai/editor-connection'
+import { WorkspaceExecutionController } from './workspace-ai/execution-controller'
 
 /** a tab lifted out of the strip with its live view: what "Open in New Window",
  *  tear-off and dock hand back and forth between the shell and a detached window */
@@ -208,6 +209,11 @@ const HOME_ID = 'home'
  */
 export class TabManager {
   private readonly workspaceEditors = new Map<string, WorkspaceEditorConnection>()
+  private workspaceExecution: {
+    generation: number
+    controller: WorkspaceExecutionController
+  } | null = null
+  private workspaceGeneration = 0
   private readonly tabs: TabRecord[] = [
     // the tab strip shows the name in the UI language (TabBar.tsx)
     { id: HOME_ID, kind: 'home', view: null, title: PRODUCT_NAME },
@@ -1941,6 +1947,45 @@ export class TabManager {
   private releaseWorkspaceEditor(id: string): void {
     this.workspaceEditors.get(id)?.dispose()
     this.workspaceEditors.delete(id)
+  }
+
+  /** One main-owned coordinator per panel generation. No renderer IPC or model call is installed. */
+  workspaceAiForPanel(generation: number): WorkspaceExecutionController {
+    if (!Number.isSafeInteger(generation) || generation <= 0)
+      throw new Error('invalid panel generation')
+    if (this.workspaceExecution?.generation === generation)
+      return this.workspaceExecution.controller
+    if (generation <= this.workspaceGeneration) throw new Error('stale panel generation')
+    this.workspaceExecution?.controller.dispose()
+    const panel = this.shellWindow.webContents
+    const onClosed = () => controller.dispose()
+    const onNavigation = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
+      if (mainFrame && !inPlace) controller.dispose()
+    }
+    const controller = new WorkspaceExecutionController({
+      owner: {
+        windowId: this.shellWindow.id,
+        panelContentsId: panel.id,
+        panelGeneration: generation,
+      },
+      resolve: (tabId) => {
+        const tab = this.tabs.find((item) => item.id === tabId)
+        const client = this.workspaceEditorForTab(tabId)
+        return tab && client ? { kind: tab.kind as DocumentTabKind, client } : null
+      },
+      onDisposed: () => {
+        panel.removeListener('did-start-navigation', onNavigation)
+        panel.removeListener('render-process-gone', onClosed)
+        this.shellWindow.removeListener('closed', onClosed)
+        if (this.workspaceExecution?.controller === controller) this.workspaceExecution = null
+      },
+    })
+    panel.on('did-start-navigation', onNavigation)
+    panel.on('render-process-gone', onClosed)
+    this.shellWindow.on('closed', onClosed)
+    this.workspaceExecution = { generation, controller }
+    this.workspaceGeneration = generation
+    return controller
   }
 
   /** the tab of this kind for the file — an unloaded one too, so the caller's

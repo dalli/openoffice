@@ -529,6 +529,7 @@ export declare function syncStyleList(
 
 /** The event the plugin fires on the editor's window when the unsaved state changes; `detail` is the new state. */
 export declare const DIRTY_EVENT: 'ieum:dirty-changed'
+export declare const WORKSPACE_CHANGED_EVENT: 'ieum:workspace-changed'
 
 export type AgentNoteKind = 'footnote' | 'endnote'
 

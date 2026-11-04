@@ -19,10 +19,16 @@ export function hostWorkspaceEditor(
   isLocallyBusy: () => boolean = () => false,
 ): () => void {
   let disposed = false
+  const hostId = crypto.randomUUID()
   let session: WorkspacePreparedDocument | null = null
   const pending = new Map<
     string,
-    { controller: AbortController; operation: WorkspaceEditorOperation }
+    {
+      controller: AbortController
+      operation: WorkspaceEditorOperation
+      done: Promise<void>
+      settle(): void
+    }
   >()
   const seen = new Set<string>()
   const check = (signal: AbortSignal) => {
@@ -40,10 +46,37 @@ export function hostWorkspaceEditor(
     signal: AbortSignal,
   ): Promise<WorkspaceEditorValues[keyof WorkspaceEditorValues]> => {
     check(signal)
-    if (operation.kind !== 'release' && isLocallyBusy()) throw new WorkspaceAdapterError('busy')
+    if (operation.kind !== 'release' && operation.kind !== 'settle' && isLocallyBusy())
+      throw new WorkspaceAdapterError('busy')
     switch (operation.kind) {
+      case 'settle': {
+        const operations = [...pending.values()].filter(({ operation: item }) =>
+          item.kind === 'prepare'
+            ? item.request.runId === operation.runId
+            : (item.kind === 'execute' || item.kind === 'verify') && item.runId === operation.runId,
+        )
+        for (const item of operations) item.controller.abort()
+        if (session?.runId === operation.runId) session.release()
+        await Promise.all(operations.map((item) => item.done))
+        if (session?.runId === operation.runId) {
+          session.release()
+          session = null
+        }
+        return null
+      }
+      case 'describe':
+        return {
+          hostId,
+          state: await adapter.capture(signal),
+          toolAccess: adapter.toolAccess,
+          masking: adapter.masking,
+          observesChanges: adapter.observesChanges,
+        }
       case 'capture':
         return adapter.capture(signal)
+      case 'rollback':
+        if (!adapter.rollback) throw new WorkspaceAdapterError('released')
+        return adapter.rollback(operation.rollbackId, operation.state, signal)
       case 'read':
         return adapter.read(operation.state, operation.read, signal)
       case 'prepare': {
@@ -67,14 +100,30 @@ export function hostWorkspaceEditor(
           throw error
         }
       }
-      case 'execute':
-        return requireSession(operation).execute(operation.call, signal)
+      case 'execute': {
+        const prepared = requireSession(operation)
+        const result = await prepared.execute(operation.call, signal)
+        return { ...result, ...(prepared.rollbackId ? { rollbackId: prepared.rollbackId } : {}) }
+      }
       case 'verify':
         return requireSession(operation).verifyResponse(operation.text, operation.executed)
-      case 'release':
-        requireSession(operation).release()
-        session = null
+      case 'release': {
+        const released = requireSession(operation)
+        released.release()
+        // A release acknowledgement is an idle barrier, not just an abort notification.
+        await Promise.all(
+          [...pending.values()]
+            .filter(
+              ({ operation: item }) =>
+                (item.kind === 'execute' || item.kind === 'verify') &&
+                item.sessionId === released.id &&
+                item.runId === released.runId,
+            )
+            .map((item) => item.done),
+        )
+        if (session === released) session = null
         return null
+      }
     }
     throw new WorkspaceAdapterError('invalid-call')
   }
@@ -92,7 +141,11 @@ export function hostWorkspaceEditor(
     seen.add(request.id)
     if (seen.size > 1024) seen.delete(seen.values().next().value!)
     const controller = new AbortController()
-    pending.set(request.id, { controller, operation: request.operation })
+    let settle!: () => void
+    const done = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    pending.set(request.id, { controller, operation: request.operation, done, settle })
     void (async () => {
       try {
         const value = await invoke(request.operation, controller.signal)
@@ -107,6 +160,7 @@ export function hostWorkspaceEditor(
           })
       } finally {
         pending.delete(request.id)
+        settle()
       }
     })()
   })
@@ -118,13 +172,18 @@ export function hostWorkspaceEditor(
     if (item.operation.kind === 'execute' || item.operation.kind === 'verify') {
       if (session?.id === item.operation.sessionId && session.runId === item.operation.runId) {
         session.release()
-        session = null
       }
     }
   })
+  const offChanges = adapter.subscribeChanges(() => {
+    if (!disposed) port.event({ hostId, kind: 'changed' })
+  })
+  port.event({ hostId, kind: 'ready' })
   return () => {
     if (disposed) return
     disposed = true
+    port.event({ hostId, kind: 'disposed' })
+    offChanges()
     offRequest()
     offCancel()
     for (const { controller } of pending.values()) controller.abort()

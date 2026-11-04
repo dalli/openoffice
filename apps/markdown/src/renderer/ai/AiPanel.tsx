@@ -221,6 +221,7 @@ export interface MarkdownAiDeps {
   getEditor(): Editor | null
   /** Changes on a file reload, including reusing this panel and editor for the same path. */
   getDocumentId?(): string
+  subscribeDocumentChanges?(handler: () => void): () => void
   /** Source buffers are not represented by the mounted block editor. */
   isSourceMode?(): boolean
   /** inner YAML of the properties block, read synchronously (write-then-read within one run) */
@@ -829,8 +830,14 @@ export function AiPanel({
     return hostWorkspaceEditor(
       port,
       createMarkdownWorkspaceAdapter({
+        rollback: {
+          capture: () => depsRef.current.getSnapshot(),
+          restore: (snapshot) => depsRef.current.restoreSnapshot(snapshot as DocSnapshot),
+        },
         getEditor: () => depsRef.current.getEditor(),
         getDocumentId: () => depsRef.current.getDocumentId?.() ?? workspaceDocumentId.current,
+        subscribeChanges: (handler) =>
+          depsRef.current.subscribeDocumentChanges?.(handler) ?? (() => {}),
         isSourceMode: () => depsRef.current.isSourceMode?.() ?? true,
         frontmatter: {
           read: () => depsRef.current.getFrontmatter(),

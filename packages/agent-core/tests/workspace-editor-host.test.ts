@@ -23,8 +23,11 @@ function fixture() {
     removeListener: vi.fn((channel: string) => {
       listeners.delete(channel)
     }),
-    send: vi.fn((_channel: string, reply: WorkspaceEditorReply) => {
-      responses.set(reply.id, reply)
+    send: vi.fn((channel: string, value: unknown) => {
+      if (channel === WORKSPACE_EDITOR_CHANNELS.reply) {
+        const reply = value as WorkspaceEditorReply
+        responses.set(reply.id, reply)
+      }
     }),
   }
   let revision = 1
@@ -39,12 +42,19 @@ function fixture() {
     return { output: 'updated', summary: 'write', mutated: true }
   })
   const dispose = vi.fn()
+  const changes = new Set<() => void>()
   let busy = false
   const adapter = createWorkspaceDocumentAdapter({
     getState: state,
     read: () => ({ text: '{{private}} UNSAVED', truncated: false }),
     masking: 'applied',
     toolAccess: { write: 'write' },
+    subscribeChanges: (handler) => {
+      changes.add(handler)
+      return () => {
+        changes.delete(handler)
+      }
+    },
     createSkill: () => ({
       id: 'test',
       systemPrompt: 'local',
@@ -86,6 +96,10 @@ function fixture() {
     result,
     request,
     prepare,
+    changed: () => {
+      revision++
+      for (const notify of changes) notify()
+    },
     busy: () => {
       busy = true
     },
@@ -93,6 +107,58 @@ function fixture() {
 }
 
 describe('private workspace editor endpoint', () => {
+  it('describes capabilities and publishes invalidation without document text', async () => {
+    const host = fixture()
+    expect(await host.request({ kind: 'describe' })).toMatchObject({
+      ok: true,
+      value: {
+        state: host.state(),
+        toolAccess: { write: 'write' },
+        masking: 'applied',
+        observesChanges: true,
+      },
+    })
+    host.changed()
+    const events = host.ipc.send.mock.calls
+      .filter(([channel]) => channel === WORKSPACE_EDITOR_CHANNELS.event)
+      .map(([, value]) => value)
+    expect(events).toEqual([
+      { hostId: expect.any(String), kind: 'ready' },
+      { hostId: expect.any(String), kind: 'changed' },
+    ])
+    expect(JSON.stringify(events)).not.toContain('UNSAVED')
+    expect(host.execute).not.toHaveBeenCalled()
+    host.stop()
+  })
+
+  it('acknowledges settlement only when a cancelled native operation has actually ended', async () => {
+    const host = fixture()
+    const session = await host.prepare()
+    let finish!: () => void
+    host.execute.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      return { output: 'ignored', summary: 'write', mutated: true }
+    })
+    const operation = host.start({
+      kind: 'execute',
+      sessionId: session.id,
+      runId: session.runId,
+      call: { id: 'slow', name: 'write', input: {} },
+    })
+    await vi.waitFor(() => expect(host.execute).toHaveBeenCalledOnce())
+    const settled = vi.fn()
+    const draining = host.request({ kind: 'settle', runId: session.runId }).then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    finish()
+    expect(await host.result(operation)).toMatchObject({ ok: false, error: 'cancelled' })
+    await draining
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ ok: true, value: null }))
+    await host.prepare()
+    host.stop()
+  })
   it('does not apply an old release to a replacement editor using the same run id', async () => {
     const previous = fixture()
     const old = await previous.prepare()
@@ -114,7 +180,9 @@ describe('private workspace editor endpoint', () => {
   })
   it('stays passive until main requests a read and returns serializable prepared capabilities', async () => {
     const host = fixture()
-    expect(host.ipc.send).not.toHaveBeenCalled()
+    expect(
+      host.ipc.send.mock.calls.filter(([channel]) => channel === WORKSPACE_EDITOR_CHANNELS.reply),
+    ).toHaveLength(0)
     expect(host.execute).not.toHaveBeenCalled()
     expect(
       await host.request({ kind: 'read', state: host.state(), read: { scope: 'document' } }),
@@ -201,7 +269,9 @@ describe('private workspace editor endpoint', () => {
     await Promise.resolve()
     expect(host.listeners.size).toBe(0)
     expect(host.dispose).toHaveBeenCalledOnce()
-    expect(host.ipc.send.mock.calls.some(([, reply]) => reply.id === id)).toBe(false)
+    expect(
+      host.ipc.send.mock.calls.some(([, reply]) => (reply as WorkspaceEditorReply).id === id),
+    ).toBe(false)
     host.stop()
     expect(host.dispose).toHaveBeenCalledOnce()
   })

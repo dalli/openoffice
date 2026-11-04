@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Editor } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
@@ -52,10 +52,12 @@ function fixture(editor = editorOf(), initialFrontmatter = '') {
   let documentId = 'document-A'
   let source = false
   let yaml = initialFrontmatter
+  const metadataChanges = new Set<() => void>()
   const frontmatter = {
     read: () => yaml,
     write: (inner: string) => {
       yaml = inner
+      for (const notify of metadataChanges) notify()
     },
   }
   const adapter = createMarkdownWorkspaceAdapter({
@@ -63,6 +65,20 @@ function fixture(editor = editorOf(), initialFrontmatter = '') {
     getDocumentId: () => documentId,
     isSourceMode: () => source,
     frontmatter,
+    rollback: {
+      capture: () => ({ doc: editor.state.doc, yaml }),
+      restore: (value) => {
+        const snapshot = value as { doc: typeof editor.state.doc; yaml: string }
+        editor.commands.setContent(snapshot.doc.toJSON())
+        frontmatter.write(snapshot.yaml)
+      },
+    },
+    subscribeChanges: (handler) => {
+      metadataChanges.add(handler)
+      return () => {
+        metadataChanges.delete(handler)
+      }
+    },
     beforeFirstWrite: () => editor.view.dispatch(closeHistory(editor.state.tr)),
   })
   adapters.push(adapter)
@@ -93,6 +109,36 @@ async function prepare(adapter: WorkspaceDocumentAdapter, mode: 'edit' | 'refere
 }
 
 describe('Markdown workspace snapshots', () => {
+  it('restores the body and frontmatter together through the editor-owned token', async () => {
+    const f = fixture(editorOf(), 'title: Original')
+    const before = f.editor.getJSON()
+    const session = await prepare(f.adapter)
+    await session.execute(
+      ops(
+        { op: 'replaceText', target: { start: 1 }, find: 'old', replace: 'new' },
+        { op: 'setFrontmatter', yaml: 'title: Changed' },
+      ),
+    )
+    const last = session.state
+    const id = session.rollbackId!
+    session.release()
+    await f.adapter.rollback!(id, last)
+    expect(f.editor.getJSON()).toEqual(before)
+    expect(f.frontmatter.read()).toBe('title: Original')
+  })
+  it('invalidates metadata snapshots as well as body edits without reading their text', async () => {
+    const host = fixture()
+    await host.adapter.capture()
+    const changed = vi.fn()
+    const off = host.adapter.subscribeChanges(changed)
+    host.frontmatter.write('title: Changed')
+    host.editor.view.dispatch(host.editor.state.tr.insertText('manual ', 1))
+    expect(changed).toHaveBeenCalledTimes(2)
+    expect(changed.mock.calls).toEqual([[], []])
+    off()
+    host.frontmatter.write('title: Later')
+    expect(changed).toHaveBeenCalledTimes(2)
+  })
   it('reads current unsaved structure and metadata with explicit truncation', async () => {
     const { adapter, editor } = fixture(
       editorOf('# Draft\n\nunsaved current material'),

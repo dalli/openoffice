@@ -70,6 +70,7 @@ export interface HwpWorkspaceAdapterDeps {
   readOnly?(): boolean
   /** Retain the existing foreign-change baseline for the panel's guarded undo action. */
   onUndoBaseline?(foreignChanges: number): void
+  subscribeChanges?(handler: () => void): () => void
 }
 
 interface CapturedSelection {
@@ -160,6 +161,7 @@ export function createHwpWorkspaceAdapter(deps: HwpWorkspaceAdapterDeps): Worksp
 
   return createWorkspaceDocumentAdapter({
     masking: 'unsupported',
+    subscribeChanges: deps.subscribeChanges,
     toolAccess: HWP_WORKSPACE_TOOL_ACCESS,
     async getState() {
       const native = await readNative()

@@ -16,6 +16,7 @@
 import { installDialogTheme } from './dialog-theme.mjs'
 
 export const AGENT_PLUGIN_ID = 'ieum-agent'
+export const WORKSPACE_CHANGED_EVENT = 'ieum:workspace-changed'
 
 /** Local document operations only; workspace routing never exposes arbitrary plugin methods. */
 const WORKSPACE_READ_METHODS = new Set([
@@ -4498,6 +4499,7 @@ export const agentPlugin = {
 
     host.events.on('document-changed', () => {
       workspaceRevision += 1
+      globalThis.dispatchEvent?.(new CustomEvent(WORKSPACE_CHANGED_EVENT))
       text = null
       pictures = null
       if (!own) {

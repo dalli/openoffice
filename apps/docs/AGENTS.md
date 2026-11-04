@@ -11,7 +11,7 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 - 문서 에디터의 AI 패널과 skill(`src/renderer/ai/`): `AiPanel.tsx`, `docs-skill.ts`, 도구(`tools.ts`, `*-ops.ts`), 편집 대기 카드(`edit-queue.ts`), 전송(`transport.ts`). AI 창 첨부 칸에는 로컬 파일(끌어다 놓기·`aiAttachTitle`)과 "Google 드라이브에서 첨부"(`DriveAttachButton`), "이음오피스 문서에서 첨부"(`DocAttachButton`, 결정 0035)가 함께 있다. 입력란의 `@` 문서 목록(결정 0051)은 `docMention`(`docMentionActions`)을 `AiComposer`의 `docs`로 넘기고, 같은 첨부 길로 붙인다. 열린 문서 고르기는 `window.aiOfficeDocs`가 있을 때만 나오고, 고른 파일은 드라이브 첨부와 같은 길(`docs:files-*`)로 첨부 칸에 들어간다.
 - 다른 에디터가 쓰는 문서 생성 흐름 `createAiDocument`(시트와 PDF의 AI가 새 docx·pdf·md를 만들 때 이 함수로 들어온다)와 프로젝트 IPC(`registerProjectIpc`).
 
-공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문 도구·ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. 전용 preload와 `hostWorkspaceEditor`에 연결했으며, 아직 공용 패널이나 모델 실행은 이 경로를 부르지 않는다. 메모·각주·머리말·꼬리말 같은 별도 저장소와 긴 글 작성기·그림·파일·네트워크는 내놓지 않는다. `tests/workspace-adapter.test.ts`는 실제 합성 편집기에서 원래 도구와 결과·추적·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`가 빌드한 앱의 전용 통신을 확인한다.
+공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문 도구·ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. PM 문서 변경은 내용 없는 변경 알림으로 메인에 전하며, 선택만 옮기는 일은 기존 범위를 바꾸지 않는다. 전용 preload와 `hostWorkspaceEditor`에 연결했으며, 아직 공용 패널이나 모델 실행은 이 경로를 부르지 않는다. 메모·각주·머리말·꼬리말 같은 별도 저장소와 긴 글 작성기·그림·파일·네트워크는 내놓지 않는다. `tests/workspace-adapter.test.ts`는 실제 합성 편집기에서 원래 도구와 결과·추적·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`가 빌드한 앱의 전용 통신을 확인한다.
 
 ## 맡지 않는 것 (경계)
 
@@ -67,6 +67,8 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 
 - `registerAiIpc`가 `ai:local-models`·`ai:local-inspect`·`ai:local-test`·`ai:local-test-cancel`을 등록한다. 입력은 `local-ipc.ts` 파서로 검사하고, 실패는 `shape`로 답한다. 연결 테스트는 보낸 창(`event.sender.id`)과 `testId`로 끊을 수 있고, 보낸 창이 닫혀도 끊긴다(`abortOnDestroyed`).
 - `ai:stream`은 활성 `custom`+`kind:'local'`일 때 그 서버의 `timeoutMs`를 `streamForProvider`에 넘기고, 기다리는 동안 `ai-keepalive.ts`의 `ping`을 보낸다. 다른 제공자에는 적용하지 않는다.
+
+공용 실행의 전체 되돌리기는 작업 화면 어댑터가 기존 `ai/rollback-snapshot.ts`로 첫 쓰기 전 문서 노드를 잡아 둔다. 스냅숏은 렌더러에만 남고, 같은 문서 버전에서 실행이 끝난 뒤 한 번 쓰는 토큰으로 복원한다. 수동 변경/읽기 전용/다시 불러오기는 거절한다. 기존 AI 창의 되돌리기 경로는 바꾸지 않는다.
 
 ## 테스트
 

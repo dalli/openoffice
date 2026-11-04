@@ -50,6 +50,43 @@ function fixture() {
 }
 
 describe('main-owned workspace editor connection', () => {
+  it('accepts metadata changes only from its main frame and invalidates a replaced renderer host', async () => {
+    const host = fixture()
+    const changed = vi.fn()
+    const closed = vi.fn()
+    host.connection.onChanged(changed)
+    host.connection.onClosed(closed)
+    const state = { instanceId: 'A', revision: '1', selectionId: null, readOnly: false }
+    const pending = host.connection.request({ kind: 'describe' })
+    host.reply(host.sent().id, {
+      hostId: 'host-1',
+      state,
+      toolAccess: {},
+      observesChanges: true,
+      masking: 'applied',
+    })
+    await pending
+    host.ipc.emit(
+      C.event,
+      { sender: host.view, senderFrame: {} },
+      { hostId: 'host-1', kind: 'changed' },
+    )
+    expect(changed).not.toHaveBeenCalled()
+    host.ipc.emit(
+      C.event,
+      { sender: host.view, senderFrame: host.view.mainFrame },
+      { hostId: 'host-1', kind: 'changed' },
+    )
+    expect(changed).toHaveBeenCalledOnce()
+    host.ipc.emit(
+      C.event,
+      { sender: host.view, senderFrame: host.view.mainFrame },
+      { hostId: 'host-2', kind: 'ready' },
+    )
+    expect(host.connection.available).toBe(false)
+    expect(closed).toHaveBeenCalledOnce()
+    expect(host.ipc.listenerCount(C.event)).toBe(0)
+  })
   it('rejects malformed replies even when the request id and sender match', async () => {
     const host = fixture()
     const pending = host.connection.request({ kind: 'capture' })
@@ -126,10 +163,8 @@ describe('main-owned workspace editor connection', () => {
       expect(host.view.send).toHaveBeenCalledWith(C.cancel, id)
       expect(host.view.send.mock.calls.filter(([channel]) => channel === C.request)).toHaveLength(1)
       host.reply(id, { instanceId: 'late' })
-      await expect(host.connection.request({ kind: 'capture' })).rejects.toMatchObject({
-        kind: 'unavailable',
-      })
-      expect(host.ipc.listenerCount(C.reply)).toBe(0)
+      expect(host.connection.available).toBe(reason === 'cancelled')
+      expect(host.ipc.listenerCount(C.reply)).toBe(reason === 'cancelled' ? 1 : 0)
     },
   )
 

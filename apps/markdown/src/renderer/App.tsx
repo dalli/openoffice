@@ -171,6 +171,7 @@ export default function App() {
   useSplitPaneFocusPing()
   const [status, setStatus] = useState<LoadStatus>('loading')
   const workspaceLoadId = useRef(crypto.randomUUID())
+  const workspaceEvents = useRef(new EventTarget())
   const [filePath, setFilePath] = useState<string | null>(null)
   // a .txt/.json has no block document behind it: it is edited as source so
   // that saving cannot reinterpret it as markdown
@@ -223,6 +224,9 @@ export default function App() {
   const [sourceViewOpen, setSourceViewOpen] = useState(false)
   const [sourceText, setSourceText] = useState('')
   const sourceViewOpenRef = useRef(false)
+  useEffect(() => {
+    workspaceEvents.current.dispatchEvent(new Event('changed'))
+  }, [sourceMode, sourceViewOpen])
   const pendingSourceRef = useRef<string | null>(null)
   const sourceApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncSourceFromEditorRef = useRef<() => void>(() => {})
@@ -459,6 +463,7 @@ export default function App() {
   const loadFromPath = useCallback(
     (path: string | null, raw: string, modePath: string | null = path) => {
       workspaceLoadId.current = crypto.randomUUID()
+      workspaceEvents.current.dispatchEvent(new Event('changed'))
       const mode = textModeForPath(modePath)
       setTextMode(mode)
       if (sourceApplyTimerRef.current) clearTimeout(sourceApplyTimerRef.current)
@@ -560,6 +565,7 @@ export default function App() {
     (inner: string) => {
       setFmText(inner)
       envelopeRef.current.frontmatter = buildFrontmatterRaw(inner)
+      workspaceEvents.current.dispatchEvent(new Event('changed'))
       markDirty()
     },
     [markDirty],
@@ -1305,6 +1311,11 @@ export default function App() {
   const aiDeps: MarkdownAiDeps = {
     getEditor: () => editorRef.current,
     getDocumentId: () => workspaceLoadId.current,
+    subscribeDocumentChanges: (handler) => {
+      const events = workspaceEvents.current
+      events.addEventListener('changed', handler)
+      return () => events.removeEventListener('changed', handler)
+    },
     isSourceMode: () => sourceMode || sourceViewOpenRef.current,
     // envelopeRef, not fmText state: a write-then-read within one AI run must
     // see the new value before React commits

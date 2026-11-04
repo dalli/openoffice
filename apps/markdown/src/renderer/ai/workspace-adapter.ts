@@ -8,6 +8,7 @@ import {
   type ToolExecution,
   type WorkspaceAdapterState,
   type WorkspaceDocumentAdapter,
+  type WorkspaceDocumentAdapterDeps,
 } from '@genoffice/agent-core'
 import { createMarkdownSkill } from './markdown-skill'
 import { frontmatterHasPrivateMarkup } from './frontmatter-model'
@@ -15,6 +16,7 @@ import { redactJson } from '../editor/redact'
 import { validateOps, type FrontmatterAccess } from '../editor/ops'
 
 export interface MarkdownWorkspaceAdapterDeps {
+  rollback?: WorkspaceDocumentAdapterDeps['rollback']
   getEditor(): Editor | null
   /** Opaque document/load identity, changed when a file is replaced in the same editor. */
   getDocumentId(): string
@@ -22,6 +24,8 @@ export interface MarkdownWorkspaceAdapterDeps {
   isSourceMode(): boolean
   frontmatter?: FrontmatterAccess
   beforeFirstWrite?(signal?: AbortSignal): void | Promise<void>
+  /** Frontmatter, source mode and document-load changes outside PM transactions. */
+  subscribeChanges?(handler: () => void): () => void
 }
 
 const TOOL_ACCESS = {
@@ -76,6 +80,7 @@ export function createMarkdownWorkspaceAdapter(
   let seenFrontmatter = ''
   let selectionSequence = 0
   const selections = new Map<string, FrozenSelection>()
+  const changes = new Set<() => void>()
 
   const changed = ({
     transaction,
@@ -87,6 +92,7 @@ export function createMarkdownWorkspaceAdapter(
     if ([transaction, ...appendedTransactions].some((item) => item.docChanged)) {
       revision++
       seenDoc = editor?.state.doc ?? null
+      for (const notify of changes) notify()
     }
   }
   const syncRevision = (live: Editor) => {
@@ -174,6 +180,15 @@ export function createMarkdownWorkspaceAdapter(
   }
 
   return createWorkspaceDocumentAdapter({
+    rollback: deps.rollback,
+    subscribeChanges(handler) {
+      changes.add(handler)
+      const off = deps.subscribeChanges?.(handler)
+      return () => {
+        changes.delete(handler)
+        off?.()
+      }
+    },
     getState: state,
     masking: 'applied',
     toolAccess: TOOL_ACCESS,

@@ -91,6 +91,40 @@ afterEach(() => {
 })
 
 describe('DOCX workspace adapter on the real Tiptap editor', () => {
+  it('restores a whole workspace run through the original rollback path and refuses later manual edits', async () => {
+    const instance = editor()
+    const before = instance.getJSON()
+    const { adapter } = connect(instance)
+    select(instance, 'First')
+    const session = await prepare(adapter)
+    await session.execute(tool('replace_selection', { html: 'Changed' }))
+    const last = session.state
+    const id = session.rollbackId!
+    session.release()
+    await adapter.rollback!(id, last)
+    expect(instance.getJSON()).toEqual(before)
+    const next = await prepare(adapter)
+    await next.execute(tool('insert_content', { html: '<p>AI appended</p>' }))
+    const final = next.state
+    next.release()
+    instance.view.dispatch(instance.state.tr.insertText('manual ', 1))
+    await expect(adapter.rollback!(next.rollbackId!, final)).rejects.toMatchObject({
+      kind: 'stale-document',
+    })
+    expect(instance.state.doc.textContent).toContain('manual ')
+  })
+  it('publishes metadata-only changes and removes observers when unsubscribed', async () => {
+    const instance = editor()
+    const { adapter } = connect(instance)
+    await adapter.capture()
+    const changed = vi.fn()
+    const off = adapter.subscribeChanges(changed)
+    instance.view.dispatch(instance.state.tr.insertText('manual ', 1))
+    expect(changed).toHaveBeenCalledWith()
+    off()
+    instance.view.dispatch(instance.state.tr.insertText('another ', 1))
+    expect(changed).toHaveBeenCalledOnce()
+  })
   it('reads current unsaved content and projects known redactions without touching source bytes', async () => {
     const source = await buildDocx({ bodyXml: `<w:p><w:r><w:t>Call ${SECRET}</w:t></w:r></w:p>` })
     const originalBytes = source.slice()

@@ -7,6 +7,7 @@ import {
   type WorkspaceEditorReply,
   type WorkspaceEditorSession,
   type WorkspaceEditorValues,
+  type WorkspaceEditorEvent,
 } from '@genoffice/agent-core/workspace-editor-protocol'
 
 interface Pending {
@@ -33,7 +34,20 @@ const sameState = (left: WorkspaceAdapterState, right: WorkspaceAdapterState) =>
 
 function validValue(operation: WorkspaceEditorOperation, value: unknown): boolean {
   switch (operation.kind) {
+    case 'describe':
+      return (
+        record(value) &&
+        text(value.hostId) &&
+        stateOf(value.state) &&
+        record(value.toolAccess) &&
+        Object.entries(value.toolAccess).every(
+          ([name, access]) => text(name) && (access === 'read' || access === 'write'),
+        ) &&
+        (value.masking === 'applied' || value.masking === 'unsupported') &&
+        typeof value.observesChanges === 'boolean'
+      )
     case 'capture':
+    case 'rollback':
       return stateOf(value)
     case 'read':
       return (
@@ -78,6 +92,7 @@ function validValue(operation: WorkspaceEditorOperation, value: unknown): boolea
         record(value) &&
         stateOf(value.state) &&
         record(value.result) &&
+        (value.rollbackId === undefined || value.rollbackId === null || text(value.rollbackId)) &&
         typeof value.result.output === 'string' &&
         typeof value.result.summary === 'string' &&
         (value.result.mutated === undefined || typeof value.result.mutated === 'boolean')
@@ -85,6 +100,7 @@ function validValue(operation: WorkspaceEditorOperation, value: unknown): boolea
     case 'verify':
       return value === null || typeof value === 'string'
     case 'release':
+    case 'settle':
       return value === null
   }
 }
@@ -103,6 +119,9 @@ export class WorkspaceEditorConnection {
   private disposed = false
   private readonly pending = new Map<string, Pending>()
   private session: Pick<WorkspaceEditorSession, 'id' | 'runId'> | null = null
+  private hostId: string | null = null
+  private readonly changes = new Set<() => void>()
+  private readonly closed = new Set<() => void>()
 
   constructor(
     private readonly contents: WebContents,
@@ -112,6 +131,7 @@ export class WorkspaceEditorConnection {
   ) {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('invalid editor timeout')
     ipc.on(WORKSPACE_EDITOR_CHANNELS.reply, this.onReply)
+    ipc.on(WORKSPACE_EDITOR_CHANNELS.event, this.onEvent)
     contents.on('destroyed', this.onGone)
     contents.on('render-process-gone', this.onGone)
     contents.on('did-start-navigation', this.onNavigation)
@@ -119,6 +139,24 @@ export class WorkspaceEditorConnection {
 
   get available(): boolean {
     return !this.disposed && !this.contents.isDestroyed() && this.isOwned()
+  }
+
+  get contentsId(): number {
+    return this.contents.id
+  }
+
+  onChanged(handler: () => void): () => void {
+    this.changes.add(handler)
+    return () => {
+      this.changes.delete(handler)
+    }
+  }
+
+  onClosed(handler: () => void): () => void {
+    this.closed.add(handler)
+    return () => {
+      this.closed.delete(handler)
+    }
   }
 
   request<O extends WorkspaceEditorOperation>(
@@ -141,8 +179,9 @@ export class WorkspaceEditorConnection {
         pending.cleanup()
         this.sendCancel(id)
         pending.reject(new WorkspaceEditorConnectionError(kind))
-        // A timed-out edit is never retried on this connection.
-        this.dispose()
+        // Cancellation is per operation; release subsequently waits for editor idleness.
+        // A timeout invalidates the connection and never retries the edit.
+        if (kind === 'timeout') this.dispose()
       }
       const abort = () => cancel('cancelled')
       const timer = setTimeout(() => cancel('timeout'), this.timeoutMs)
@@ -185,9 +224,13 @@ export class WorkspaceEditorConnection {
     }
     this.session = null
     this.ipc.removeListener(WORKSPACE_EDITOR_CHANNELS.reply, this.onReply)
+    this.ipc.removeListener(WORKSPACE_EDITOR_CHANNELS.event, this.onEvent)
     this.contents.removeListener('destroyed', this.onGone)
     this.contents.removeListener('render-process-gone', this.onGone)
     this.contents.removeListener('did-start-navigation', this.onNavigation)
+    for (const notify of this.closed) notify()
+    this.closed.clear()
+    this.changes.clear()
   }
 
   private readonly onReply = (event: IpcMainEvent, reply: WorkspaceEditorReply): void => {
@@ -215,6 +258,15 @@ export class WorkspaceEditorConnection {
       this.dispose()
       return
     }
+    if (pending.operation.kind === 'describe') {
+      const description = reply.value as WorkspaceEditorValues['describe']
+      if (this.hostId && this.hostId !== description.hostId) {
+        pending.reject(new WorkspaceEditorConnectionError('closed'))
+        this.dispose()
+        return
+      }
+      this.hostId = description.hostId
+    }
     if (pending.operation.kind === 'prepare') {
       const prepared = reply.value as WorkspaceEditorSession | null
       if (!prepared || typeof prepared.id !== 'string' || typeof prepared.runId !== 'string') {
@@ -223,8 +275,33 @@ export class WorkspaceEditorConnection {
         return
       }
       this.session = { id: prepared.id, runId: prepared.runId }
-    } else if (pending.operation.kind === 'release') this.session = null
+    } else if (
+      pending.operation.kind === 'release' ||
+      (pending.operation.kind === 'settle' && pending.operation.runId === this.session?.runId)
+    )
+      this.session = null
     pending.resolve(reply.value)
+  }
+
+  private readonly onEvent = (event: IpcMainEvent, update: WorkspaceEditorEvent): void => {
+    if (
+      event.sender !== this.contents ||
+      event.senderFrame !== this.contents.mainFrame ||
+      !update ||
+      !text(update.hostId)
+    )
+      return
+    if (update.kind !== 'ready' && update.kind !== 'changed' && update.kind !== 'disposed') return
+    if (!this.available) {
+      this.dispose()
+      return
+    }
+    if ((this.hostId && this.hostId !== update.hostId) || update.kind === 'disposed') {
+      this.dispose()
+      return
+    }
+    this.hostId = update.hostId
+    if (update.kind === 'changed') for (const notify of this.changes) notify()
   }
 
   private readonly onGone = (): void => {

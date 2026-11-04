@@ -30,6 +30,7 @@ export interface HwpAiDockProps {
   setOpen(open: boolean): void
   /** the document operations of the open editor */
   bridge: AgentBridge
+  subscribeDocumentChanges?(handler: () => void): () => void
   /** the file of the open document: the conversation is kept with it */
   filePath: string | null
   /** the document while it can go along as a skill's template (spec 5.7) */
@@ -43,6 +44,7 @@ export function HwpAiDock({
   open,
   setOpen,
   bridge,
+  subscribeDocumentChanges,
   filePath,
   templateDocument,
   prefill,
@@ -65,6 +67,7 @@ export function HwpAiDock({
       )}
       <AiPanel
         bridge={bridge}
+        subscribeDocumentChanges={subscribeDocumentChanges}
         filePath={filePath}
         onCollapse={() => setOpen(false)}
         templateDocument={templateDocument}
