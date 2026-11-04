@@ -62,6 +62,7 @@ export type {
   CreateDocumentSkill,
 } from './create-document-skill'
 export type { AgentSkill, ExecutedToolCall } from './skill'
+export * from './workspace-adapter'
 export {
   AUTO_SKILLS_MAX,
   AUTO_SKILLS_NAMES_ONLY_MAX,

@@ -9,6 +9,8 @@
     ".": "./src/index.ts",
     "./redact-range": "./src/redact-range.ts",
     "./redact-core": "./src/redact-core.ts",
+    "./workspace-editor-protocol": "./src/workspace-editor-protocol.ts",
+    "./workspace-editor-host": "./src/workspace-editor-host.ts",
     "./user-skill-names": "./src/user-skill-names.ts",
     "./user-mcp/names": "./src/user-mcp/names.ts",
     "./user-mcp/result": "./src/user-mcp/result.ts",
