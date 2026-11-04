@@ -212,7 +212,7 @@ AI 창(아홉 편집기, 홈 AI 질문)
 
 ### 공용 AI 개편의 기반 (결정 0107, 구현 중)
 
-공용 패널 공간은 `TabManager.setWorkspacePanel`로 예약할 수 있지만, **현재 앱에서는 호스트가 붙지 않아 예약하지 않는다.** 합성 문서의 네이티브 보기와 로컬 가짜 응답으로 배치 시제품을 검사한다. `shared/workspace-ai-api.ts`와 `main/workspace-ai/run-registry.ts`도 아직 IPC에 등록하지 않은 모델이다. 대화·실행·문서 세대·선택·프로젝트를 고정하고 참고의 쓰기를 거절하며, 창마다 실행 하나와 대기열을 다룬다. 실제 도구 실행·모델 호출·대화 보관은 연결하지 않았다. 편집기 어댑터와 현재 자료의 가리기 읽기를 검증한 뒤 공용 패널을 켜야 한다([연결 계약](plans/workspace-ui-contracts.md)). 그때까지 위 결정 0037의 편집기 패널 배선은 유효하다.
+공용 패널 공간은 `TabManager.setWorkspacePanel`로 예약할 수 있지만, **현재 앱에서는 호스트가 붙지 않아 예약하지 않는다.** 합성 문서의 네이티브 보기와 로컬 가짜 응답으로 배치 시제품을 검사한다. `shared/workspace-ai-api.ts`와 `main/workspace-ai/run-registry.ts`도 아직 IPC에 등록하지 않은 모델이다. 대화·실행·문서 세대·선택·프로젝트를 고정하고 참고의 쓰기를 거절하며, 창마다 실행 하나와 대기열을 다룬다. HWP·DOCX·Markdown의 문서 어댑터와 `workspace-ai:editor-*` 전용 통신은 각 편집기의 preload와 렌더러에 연결했다. 메인의 `WorkspaceEditorConnection`은 실제 보기·최상위 프레임·요청 번호로 답을 검증하며 `TabManager.workspaceEditorForTab`만 해당 창의 이미 열린 보기를 내준다. 이 통신은 모델 호출·공용 패널·대화 보관·실행 바인딩 모델에는 아직 연결하지 않았다. 어댑터를 통과하는 현재 자료의 가리기 읽기와 실제 도구 실행을 검증한 뒤 공용 패널을 켜야 한다([연결 계약](plans/workspace-ui-contracts.md)). 그때까지 위 결정 0037의 편집기 패널 배선은 유효하다.
 
 ## 켤 때의 흐름과 갑자기 꺼진 뒤 (결정 0061)
 

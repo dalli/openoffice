@@ -1,6 +1,6 @@
 import { basename, join } from 'node:path'
 import { realpathSync } from 'node:fs'
-import { BrowserWindow, shell, WebContentsView } from 'electron'
+import { BrowserWindow, ipcMain, shell, WebContentsView } from 'electron'
 import type { Rectangle, WebContents } from 'electron'
 import { PRODUCT_NAME } from '@genoffice/i18n'
 
@@ -94,6 +94,7 @@ import type { ConvertedDocument } from './generate/convert'
 import { queueConvertedContent } from './generate/converted-tab'
 import { releaseClosedRenderer } from './renderer-disposal'
 import type { SessionStripState } from './session-record'
+import { WorkspaceEditorConnection } from './workspace-ai/editor-connection'
 
 /** a tab lifted out of the strip with its live view: what "Open in New Window",
  *  tear-off and dock hand back and forth between the shell and a detached window */
@@ -206,6 +207,7 @@ const HOME_ID = 'home'
  * own — hiding every other tab reveals the shell window's own content.
  */
 export class TabManager {
+  private readonly workspaceEditors = new Map<string, WorkspaceEditorConnection>()
   private readonly tabs: TabRecord[] = [
     // the tab strip shows the name in the UI language (TabBar.tsx)
     { id: HOME_ID, kind: 'home', view: null, title: PRODUCT_NAME },
@@ -1768,6 +1770,7 @@ export class TabManager {
   private removeTab(id: string): void {
     const idx = this.tabs.findIndex((t) => t.id === id)
     if (idx < 0) return
+    this.releaseWorkspaceEditor(id)
     if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
     const [removed] = this.tabs.splice(idx, 1)
     if (removed.filePath && !removed.present)
@@ -1829,6 +1832,7 @@ export class TabManager {
     if (!tab || tab.present || this.closingIds.has(id)) return null
     // an unloaded tab leaves with a live document: it loads first
     if (!this.loadTab(tab) || !tab.view) return null
+    this.releaseWorkspaceEditor(id)
     this.tabs.splice(idx, 1)
     if (this.htmlFullScreenId === id) this.htmlFullScreenId = null
     const view = tab.view
@@ -1913,6 +1917,30 @@ export class TabManager {
 
   webContentsForTab(id: string): WebContents | undefined {
     return this.tabs.find((t) => t.id === id)?.view?.webContents
+  }
+
+  /** Private main API; never loads recovery tabs or accepts a renderer-supplied contents id. */
+  workspaceEditorForTab(id: string): WorkspaceEditorConnection | null {
+    const tab = this.tabs.find((item) => item.id === id)
+    if (!tab || tab.present || !['docs', 'markdown', 'hwp'].includes(tab.kind) || !tab.view)
+      return null
+    const contents = tab.view.webContents
+    if (contents.isDestroyed()) return null
+    const previous = this.workspaceEditors.get(id)
+    if (previous?.available) return previous
+    previous?.dispose()
+    const connection = new WorkspaceEditorConnection(
+      contents,
+      ipcMain,
+      () => !this.shellWindow.isDestroyed() && this.webContentsForTab(id) === contents,
+    )
+    this.workspaceEditors.set(id, connection)
+    return connection
+  }
+
+  private releaseWorkspaceEditor(id: string): void {
+    this.workspaceEditors.get(id)?.dispose()
+    this.workspaceEditors.delete(id)
   }
 
   /** the tab of this kind for the file — an unloaded one too, so the caller's

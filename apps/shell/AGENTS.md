@@ -139,6 +139,8 @@
 
 ## 테스트
 
+- 편집기 전용 연결은 `main/workspace-ai/editor-connection.ts`와 `TabManager.workspaceEditorForTab`이다. HWP·DOCX·Markdown의 이미 불러온 같은 창 보기만 받는다. 실제 보기 객체·최상위 프레임·요청 번호·답 구조를 검사하며 중단·시간 초과·새로고침·렌더러 종료·탭 떼어내기에 무효화한다. 공개 MCP나 모델 요청 입구를 만들지 않는다. `workspace-editor-connection.test.ts`가 수명·잘못된 sender·늦은 답을 검사하고, `e2e/workspace-editor-adapters.spec.ts`가 실제 preload와 합성 문서 편집을 검사한다. 공용 패널 및 실행 바인딩 모델과의 통합은 아직 없다.
+
 - 작업 화면 개편(결정 0107)은 단계적이다. `split-menu.ts`·`tabs:show-split-menu`의 탭 표시줄 입구는 기존 분할 경로를 쓴다. `shared/workspace-layout.ts`는 AI 공간을 제외한 문서 영역을 main/renderer가 함께 계산하고, 실제 구분선(`SplitDivider.tsx`)은 확대된 틀 밖의 포털로 그린다. `setWorkspacePanel`은 검증된 호스트가 붙을 때만 쓰며 현재 앱은 예약하지 않는다. `main/workspace-ai/run-registry.ts`는 IPC에 등록하지 않은 기반 모델이다. 실제 어댑터·대화 보관·공용 패널 검증 전에는 기존 AI 패널을 끄지 않는다. 상세는 `docs/plans/workspace-ui-contracts.md`.
 - 새 분할 입구는 `split-menu.test.ts`·`tabbar-split-menu.test.ts`·`preload-split-menu.test.ts`, 공간/실행 격리는 `workspace-layout.test.ts`·`workspace-ai-run-registry.test.ts`, 설정/첫 안내 키보드는 `settings-keyboard.test.ts`·`onboarding.test.ts`가 검사한다. `e2e/workspace-layout-prototype.spec.ts`는 실제 구분선과 합성 네이티브 보기의 배치만 검사한다. 실제 편집기·모델·저장 검증을 대신하지 않는다.
 
