@@ -195,6 +195,8 @@
 - **편집기 화면은 껍데기 앱의 화면보다 위에 그려진다.** 편집기 탭이 켜져 있으면 껍데기 앱의 겹침 화면(첫 실행 안내 등)은 가려진다. 그래서 그런 화면은 홈 탭이 켜져 있을 때만 그린다.
 - **Electron은 잡히지 않은 예외로 꺼지지 않는다.** 대화 상자를 띄우고 계속 돈다. 그래서 동작을 바꾸는 예외 처리기를 두지 않았고, 프로그램 정리는 종료 경로(`will-quit`, 프로세스 `exit`)에 걸려 있다. 크래시 기록은 보기만 하는 `uncaughtExceptionMonitor`로 받는다. `uncaughtException`에 처리기를 붙이면 Electron의 대화 상자가 사라진다.
 
+- **공용 AI 화면의 중단 버튼이 실행을 찾지 못한다.** 대화 상태는 `structuredClone`으로 화면에 내주므로 그 안의 실행 식별자는 원래 객체와 참조가 다르다. → `WorkspaceRunHost.cancel`은 객체 참조 대신 `controllerId/conversationId/runId/generation` 네 값을 모두 비교한다. 같은 run id라도 다른 컨트롤러·대화·세대는 중단하면 안 된다. `workspace-run-host.test.ts`의 복사된 UI 식별자와 `workspace-panel.test.ts`의 레일 중단이 이 경계를 검사한다.
+
 ## 메모리와 크래시
 
 - **창을 여러 번 열고 닫으면 메모리가 계속 는다.** 닫은 워드 탭과 떼어 낸 워드 창은 UI 멈춤을 피하려고 webContents를 닫지 않는다. 예전에는 렌더러 프로세스(빈 문서 하나에 약 215MB)까지 앱이 끝날 때까지 남아, 8GB PC에서 메모리가 바닥날 수 있었다. → 닫을 때 `releaseClosedRenderer`로 프로세스만 끝낸다(`renderer-disposal.ts`). 다른 열린 화면과 프로세스를 함께 쓰면 끝내지 않는다. 다른 편집기는 `webContents.close()`로 프로세스가 끝난다. 빌드한 앱에서 탭을 닫은 뒤 `app.getAppMetrics()`의 `Tab` 수가 처음으로 돌아오는지 본다.

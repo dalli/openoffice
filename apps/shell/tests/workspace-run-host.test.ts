@@ -13,6 +13,27 @@ function fixture(...args: Parameters<typeof makeWorkspaceHost>) {
 }
 
 describe('workspace model host through the real execution boundary', () => {
+  it('accepts cloned UI run handles and rejects another controller, conversation, run or generation', async () => {
+    const f = fixture()
+    f.addEditor('A')
+    const p = await f.conversation('P', 'A')
+    const submitted = (await p.send())!
+    await until(() => f.requests.length === 1)
+    const copied = f.host.conversations.state(p.id).runs[0]!.run
+    expect(copied).toEqual(submitted.run)
+    expect(copied).not.toBe(submitted.run)
+    for (const invalid of [
+      { ...copied, controllerId: 'another-controller' },
+      { ...copied, conversationId: 'another-conversation' },
+      { ...copied, runId: 'another-run' },
+      { ...copied, generation: copied.generation + 1 },
+    ])
+      await f.host.cancel(invalid)
+    expect(f.cancellations).not.toHaveBeenCalled()
+    await f.host.cancel(copied)
+    await submitted.done
+    expect(f.cancellations).toHaveBeenCalledTimes(1)
+  })
   it('uses the updated stable record source if first save rebinds between the two history writes', async () => {
     const origins: unknown[] = []
     let id = ''

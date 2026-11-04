@@ -522,7 +522,13 @@ export class WorkspaceRunHost {
   }
 
   async cancel(run: WorkspaceConversationRun): Promise<void> {
-    const work = [this.active, ...this.queue].find((item) => item?.ticket === run)
+    const work = [this.active, ...this.queue].find(
+      (item) =>
+        item?.ticket.controllerId === run.controllerId &&
+        item.ticket.conversationId === run.conversationId &&
+        item.ticket.runId === run.runId &&
+        item.ticket.generation === run.generation,
+    )
     if (work) await this.end(work, new Error('cancelled'))
   }
   /** Called by the panel when the shared gate changes; it can resume only previously submitted work. */
