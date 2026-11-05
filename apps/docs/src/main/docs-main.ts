@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { handOffBytes } from './byte-handoff'
+import { emitLegacyChatEvent } from './legacy-chat-events'
 import {
   appendFileSync,
   existsSync,
@@ -4402,7 +4403,7 @@ export function registerAiIpc(): void {
 let projectStore: ProjectStore | null = null
 let projectIpcRegistered = false
 
-function getProjectStore(): ProjectStore {
+export function getProjectStore(): ProjectStore {
   if (!projectStore) projectStore = new ProjectStore(app.getPath('userData'))
   return projectStore
 }
@@ -4481,6 +4482,7 @@ export function legacyDocumentChatFor(filePath: string): LegacyDocumentChat | nu
 export function projectFileRenamed(oldPath: string, newPath: string): void {
   try {
     getProjectStore().fileRenamed(oldPath, newPath)
+    emitLegacyChatEvent({ kind: 'renamed' })
   } catch (err) {
     console.warn('[project-store] fileRenamed failed:', err)
   }
@@ -4504,13 +4506,12 @@ export function registerProjectIpc(): void {
       if (!resolvedPath && args.sessionId && sessionPathResolver) {
         resolvedPath = sessionPathResolver(event.sender.id, args.sessionId)
       }
-      if (!resolvedPath) {
-        return {
-          projectId: 'default',
-          chatId: args.tempChatId ?? `unsaved-${Date.now()}`,
-        }
-      }
-      return store.resolveChatForFile(resolvedPath)
+      const ref = resolvedPath
+        ? store.resolveChatForFile(resolvedPath)
+        : { projectId: 'default', chatId: args.tempChatId ?? `unsaved-${Date.now()}` }
+      if (event.senderFrame === event.sender.mainFrame)
+        emitLegacyChatEvent({ kind: 'resolved', sender: event.sender, ref })
+      return ref
     },
   )
 
@@ -4558,6 +4559,10 @@ export function registerProjectIpc(): void {
       if (Array.isArray(args.skills)) msg.skills = args.skills as NonNullable<typeof msg.skills>
 
       store.appendChatMessage(args.projectId, args.chatId, msg)
+      emitLegacyChatEvent({
+        kind: 'appended',
+        ref: { projectId: args.projectId, chatId: args.chatId },
+      })
     },
   )
 
@@ -4595,11 +4600,14 @@ export function registerProjectIpc(): void {
       if (!path && args.sessionId && sessionPathResolver) {
         path = sessionPathResolver(event.sender.id, args.sessionId)
       }
-      if (path) {
-        return store.rebindChatToFile(args.projectId, args.tempChatId, path)
-      }
-      if (args.newChatId) store.rebindChat(args.projectId, args.tempChatId, args.newChatId)
-      return { projectId: args.projectId, chatId: args.newChatId ?? args.tempChatId }
+      const previous = { projectId: args.projectId, chatId: args.tempChatId }
+      const ref = path
+        ? store.rebindChatToFile(args.projectId, args.tempChatId, path)
+        : { projectId: args.projectId, chatId: args.newChatId ?? args.tempChatId }
+      if (!path && args.newChatId) store.rebindChat(args.projectId, args.tempChatId, args.newChatId)
+      if (event.senderFrame === event.sender.mainFrame)
+        emitLegacyChatEvent({ kind: 'resolved', sender: event.sender, ref, previous })
+      return ref
     },
   )
 }

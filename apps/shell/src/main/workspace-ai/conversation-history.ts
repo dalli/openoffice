@@ -3,6 +3,7 @@ import type { WorkspaceConversationOrigin } from '../../shared/workspace-ai-api'
 import type { ChatSender, ProjectChatStore } from '../projects/chat-store'
 
 export interface WorkspaceHistory {
+  readonly origin?: WorkspaceConversationOrigin
   readonly messages: readonly ChatMessage[]
   /** Retained for the existing foreign-record notice; never grants project trust. */
   readonly foreign: boolean
@@ -11,8 +12,9 @@ export interface WorkspaceHistory {
 export type WorkspaceHistoryMessage = Omit<ChatMessage, 'seq' | 'ts'>
 
 export interface WorkspaceMemoryHistorySource {
-  load(): readonly ChatMessage[]
-  append(message: WorkspaceHistoryMessage): void
+  load(): readonly ChatMessage[] | Promise<readonly ChatMessage[]>
+  append(message: WorkspaceHistoryMessage): void | Promise<void>
+  release?(): void
 }
 
 /** Main-only router. Origins are references, never instructions to migrate or merge records. */
@@ -50,6 +52,18 @@ export class WorkspaceConversationHistory {
     }
   }
 
+  memoryOrigins(): WorkspaceConversationOrigin[] {
+    return [...this.memorySources.keys()].map((conversationId) => ({
+      kind: 'window-memory',
+      windowSessionId: this.windowSessionId,
+      conversationId,
+    }))
+  }
+
+  releaseMemory(): void {
+    for (const source of this.memorySources.values()) source.release?.()
+  }
+
   private assertMemory(
     origin: Extract<WorkspaceConversationOrigin, { kind: 'window-memory' }>,
   ): void {
@@ -85,7 +99,7 @@ export class WorkspaceConversationHistory {
         this.assertMemory(origin)
         return {
           messages: structuredClone(
-            this.memorySources.get(origin.conversationId)?.load() ??
+            (await this.memorySources.get(origin.conversationId)?.load()) ??
               this.memory.get(origin.conversationId) ??
               [],
           ),
@@ -121,7 +135,7 @@ export class WorkspaceConversationHistory {
         this.assertMemory(origin)
         const source = this.memorySources.get(origin.conversationId)
         if (source) {
-          source.append(structuredClone(message))
+          await source.append(structuredClone(message))
           return 'memory'
         }
         const messages = this.memory.get(origin.conversationId) ?? []

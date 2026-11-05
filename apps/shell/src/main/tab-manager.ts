@@ -99,7 +99,11 @@ import { queueConvertedContent } from './generate/converted-tab'
 import { releaseClosedRenderer } from './renderer-disposal'
 import type { SessionStripState } from './session-record'
 import { WorkspaceEditorConnection } from './workspace-ai/editor-connection'
-import { WorkspaceExecutionController } from './workspace-ai/execution-controller'
+import {
+  WorkspaceExecutionController,
+  type WorkspaceExecutionDeps,
+} from './workspace-ai/execution-controller'
+import type { WorkspacePanelDocument } from '../shared/workspace-panel-api'
 
 /** a tab lifted out of the strip with its live view: what "Open in New Window",
  *  tear-off and dock hand back and forth between the shell and a detached window */
@@ -245,6 +249,7 @@ export class TabManager {
   private split: SplitViewState | null = null
   /** Opt-in reservation; stays null until a verified shell AI host is attached. */
   private workspacePanel: WorkspacePanelLayout | null = null
+  private readonly workspaceLayoutListeners = new Set<(layout: WorkspaceLayout) => void>()
   /** the tab shown before the current one: the "other document" a split falls
    *  back to when the dropped tab was itself the visible one */
   private previousActiveId: string | null = null
@@ -384,6 +389,13 @@ export class TabManager {
     return this.workspaceBounds()
   }
 
+  onWorkspaceLayoutChanged(listener: (layout: WorkspaceLayout) => void): () => void {
+    this.workspaceLayoutListeners.add(listener)
+    return () => {
+      this.workspaceLayoutListeners.delete(listener)
+    }
+  }
+
   /** the tab whose view covers the whole window right now (HTML fullscreen / slides show) */
   private coverTabId(): string | null {
     if (this.htmlFullScreenId !== null) return this.htmlFullScreenId
@@ -466,6 +478,10 @@ export class TabManager {
       this.split = null
     }
     const cover = this.coverTabId()
+    if (this.workspaceLayoutListeners.size) {
+      const layout = this.workspaceBounds()
+      for (const listener of this.workspaceLayoutListeners) listener(layout)
+    }
     if (cover !== null) {
       for (const t of this.tabs) t.view?.setVisible(t.id === cover)
       this.tabById(cover)?.view?.setBounds(this.windowRect())
@@ -514,6 +530,23 @@ export class TabManager {
       active: t.id === this.activeId,
       ...(t.filePath ? { filePath: t.filePath } : {}),
     }))
+  }
+
+  /** Metadata only: listing must not query document text, selection or recovery openers. */
+  workspaceDocuments(): WorkspacePanelDocument[] {
+    return this.tabs.flatMap((tab) =>
+      tab.kind === 'home' || tab.kind === 'help' || tab.present
+        ? []
+        : [
+            {
+              id: tab.id,
+              kind: tab.kind,
+              title: tab.title,
+              active: tab.id === this.activeId,
+              available: !!this.workspaceEditorForTab(tab.id)?.available,
+            },
+          ],
+    )
   }
 
   /**
@@ -1961,8 +1994,11 @@ export class TabManager {
     this.workspaceEditors.delete(id)
   }
 
-  /** One main-owned coordinator per panel generation. No renderer IPC or model call is installed. */
-  workspaceAiForPanel(generation: number): WorkspaceExecutionController {
+  /** One main-owned coordinator per panel generation; no provider is started here. */
+  workspaceAiForPanel(
+    generation: number,
+    events: Pick<WorkspaceExecutionDeps, 'onStopped' | 'onDisposed'> = {},
+  ): WorkspaceExecutionController {
     if (!Number.isSafeInteger(generation) || generation <= 0)
       throw new Error('invalid panel generation')
     if (this.workspaceExecution?.generation === generation)
@@ -1985,11 +2021,13 @@ export class TabManager {
         const client = this.workspaceEditorForTab(tabId)
         return tab && client ? { kind: tab.kind as DocumentTabKind, client } : null
       },
+      onStopped: events.onStopped,
       onDisposed: () => {
         panel.removeListener('did-start-navigation', onNavigation)
         panel.removeListener('render-process-gone', onClosed)
         this.shellWindow.removeListener('closed', onClosed)
         if (this.workspaceExecution?.controller === controller) this.workspaceExecution = null
+        events.onDisposed?.()
       },
     })
     panel.on('did-start-navigation', onNavigation)

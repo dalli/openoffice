@@ -315,6 +315,32 @@ describe('initial state', () => {
 })
 
 describe('workspace panel reservation', () => {
+  it('publishes the actual document region through resize, scale, split and presentation changes', () => {
+    let scale = 1
+    manager = new TabManager(shellWindow as never, onChanged, applyMenuFor, undefined, () => scale)
+    const a = manager.openDocsTab()
+    const view = lastCreatedView(createDocsView)
+    const b = manager.openHtmlTab()
+    const changed = vi.fn()
+    const off = manager.onWorkspaceLayoutChanged(changed)
+    manager.setWorkspacePanel({ side: 'left', width: 300, open: true })
+    expect(changed).toHaveBeenLastCalledWith(manager.workspaceBounds())
+    shellWindow.getContentBounds = () => ({ x: 0, y: 0, width: 1280, height: 800 })
+    scale = 1.5
+    manager.layout()
+    expect(changed.mock.lastCall![0].documents.x).toBe(450)
+    manager.beginSplit(a, b, 'side', 0.5, 'a')
+    expect(changed).toHaveBeenLastCalledWith(manager.workspaceBounds())
+    manager.setContentBleed(view.webContents as never, true)
+    expect(changed.mock.lastCall![0].panelMode).toBe('hidden')
+    manager.setContentBleed(view.webContents as never, false)
+    expect(changed.mock.lastCall![0].panelMode).toBe('open')
+    off()
+    changed.mockClear()
+    manager.setWorkspacePanel(null)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
   it('reserves the same shell area through tab switches and restores the full width on detach', () => {
     const docsId = manager.openDocsTab()
     const docs = lastCreatedView(createDocsView)

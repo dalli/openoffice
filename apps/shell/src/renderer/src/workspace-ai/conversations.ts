@@ -6,6 +6,8 @@ import type {
   WorkspaceProjectBinding,
   WorkspaceReference,
 } from '../../../shared/workspace-ai-api'
+import { workspaceConversationKey } from '../../../shared/workspace-ai-api'
+export { workspaceConversationKey } from '../../../shared/workspace-ai-api'
 
 export interface WorkspaceComposer {
   text: string
@@ -60,6 +62,7 @@ interface RunEntry {
   permissionIds: Set<string>
 }
 interface Session<R> {
+  historyRevision: number
   state: WorkspaceConversationState
   runtime: R
   runs: Map<number, RunEntry>
@@ -67,25 +70,14 @@ interface Session<R> {
 }
 
 export interface WorkspaceConversationsDeps<R extends WorkspaceConversationRuntime> {
-  load(
-    origin: WorkspaceConversationOrigin,
-  ): Promise<{ readonly messages: readonly ChatMessage[]; readonly foreign: boolean }>
+  load(origin: WorkspaceConversationOrigin): Promise<{
+    readonly messages: readonly ChatMessage[]
+    readonly foreign: boolean
+    readonly origin?: WorkspaceConversationOrigin
+  }>
   /** Create one loop/history owner per conversation. This factory must not start a model request. */
   createRuntime(id: string, messages: readonly ChatMessage[]): R
   changed?(): void
-}
-
-/** Only origin identity is used; document focus, titles and paths are not conversation identity. */
-export function workspaceConversationKey(origin: WorkspaceConversationOrigin): string {
-  switch (origin.kind) {
-    case 'legacy-document':
-    case 'project':
-      return JSON.stringify([origin.kind, origin.projectId, origin.chatId])
-    case 'workspace':
-      return JSON.stringify([origin.kind, origin.conversationId])
-    case 'window-memory':
-      return JSON.stringify([origin.kind, origin.windowSessionId, origin.conversationId])
-  }
 }
 
 /** No IPC, model calls or implicit persistence. A future panel host supplies the guarded bridges. */
@@ -121,15 +113,19 @@ export class WorkspaceConversations<R extends WorkspaceConversationRuntime> {
       .then(async () => {
         const history = await this.deps.load(savedOrigin)
         if (this.closed) throw new Error('Conversation controller is closed')
+        const resolvedKey = workspaceConversationKey(history.origin ?? savedOrigin)
+        const resolved = this.aliases.get(resolvedKey) ?? resolvedKey
+        if (this.sessions.has(resolved)) throw new Error('Cannot merge open conversation histories')
         const messages = structuredClone([...history.messages])
         const runtime = this.deps.createRuntime(key, structuredClone(messages))
         this.sessions.set(key, {
+          historyRevision: 0,
           runtime,
           runs: new Map(),
           permissions: new Map(),
           state: {
             id: key,
-            origin: savedOrigin,
+            origin: structuredClone(history.origin ?? savedOrigin),
             messages,
             foreign: history.foreign,
             composer: {
@@ -148,6 +144,7 @@ export class WorkspaceConversations<R extends WorkspaceConversationRuntime> {
             error: null,
           },
         })
+        this.aliases.set(workspaceConversationKey(history.origin ?? savedOrigin), key)
         this.deps.changed?.()
         return key
       })
@@ -189,6 +186,22 @@ export class WorkspaceConversations<R extends WorkspaceConversationRuntime> {
   }
   runtime(id: string): R {
     return this.session(id).runtime
+  }
+  historyRevision(id: string): number {
+    return this.session(id).historyRevision
+  }
+  historyError(id: string, error: string): void {
+    this.session(id).state.error = error
+    this.deps.changed?.()
+  }
+  replaceHistory(id: string, messages: readonly ChatMessage[], foreign: boolean): void {
+    const session = this.session(id)
+    if (session.state.runs.some((run) => run.status === 'running'))
+      throw new Error('Cannot replace running history')
+    session.state.messages = structuredClone([...messages])
+    session.state.foreign = foreign
+    session.historyRevision++
+    this.deps.changed?.()
   }
   list(): WorkspaceConversationState[] {
     return [...this.sessions.keys()].map((id) => this.state(id))
@@ -266,6 +279,7 @@ export class WorkspaceConversations<R extends WorkspaceConversationRuntime> {
       const message = structuredClone(event.message)
       if (message.role === 'user') message.text = sanitizeAgentPayload(message.text)
       session.state.messages.push(message)
+      session.historyRevision++
     } else if ('progress' in event) session.state.progress = event.progress
     else session.state.error = event.error
     this.deps.changed?.()

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeWorkspaceHost, until, tick, deferred } from './helpers/workspace-host-fixture'
+import type { ChatMessage } from '@genoffice/project-store'
 import type { WorkspacePendingSend } from '../src/renderer/src/workspace-ai/run-host'
 
 const cleanups: Array<() => void> = []
@@ -13,6 +14,88 @@ function fixture(...args: Parameters<typeof makeWorkspaceHost>) {
 }
 
 describe('workspace model host through the real execution boundary', () => {
+  it('refreshes only the original idle transcript and keeps its draft, runtime, selection and MCP choices', async () => {
+    let records: ChatMessage[] = []
+    const f = fixture({
+      load: async () => ({ messages: structuredClone(records), foreign: false }),
+    })
+    f.addEditor('A')
+    const p = await f.conversation('P', 'A')
+    const q = await f.conversation('Q', 'A')
+    const runtime = f.host.conversations.runtime(p.id)
+    f.host.conversations.edit(p.id, {
+      scrollTop: 33,
+      mcp: { disabledServers: ['one'], alwaysAllowedTools: [] },
+    })
+    f.host.conversations.select(q.id)
+    records = [
+      { seq: 0, ts: new Date().toISOString(), role: 'assistant', text: 'external original reply' },
+    ]
+    f.host.historyChanged(f.host.conversations.state(p.id).origin)
+    await until(() => f.host.conversations.state(p.id).messages.length === 1)
+    expect(f.host.conversations.runtime(p.id)).toBe(runtime)
+    expect(runtime.loop.messages).toEqual([{ role: 'assistant', text: 'external original reply' }])
+    expect(f.host.conversations.selectedId).toBe(q.id)
+    expect(f.host.conversations.state(q.id).messages).toEqual([])
+    expect(f.host.conversations.state(p.id)).toMatchObject({
+      scrollTop: 33,
+      composer: { text: 'edit A' },
+      mcp: { disabledServers: ['one'] },
+    })
+    expect(f.requests).toEqual([])
+  })
+
+  it('does not overwrite an in-flight transcript with a late history read', async () => {
+    const waiting = deferred()
+    let delay = false
+    const f = fixture({
+      load: async () => {
+        if (delay) await waiting.promise
+        return {
+          messages: [
+            { seq: 0, ts: new Date().toISOString(), role: 'assistant' as const, text: 'external' },
+          ],
+          foreign: false,
+        }
+      },
+    })
+    f.addEditor('A')
+    const p = await f.conversation('P', 'A')
+    const run = (await p.send())!
+    await until(() => f.requests.length === 1)
+    delay = true
+    f.host.historyChanged(f.host.conversations.state(p.id).origin)
+    expect(f.host.conversations.state(p.id).messages.at(-1)?.role).toBe('user')
+    f.callbacks.get(p.id)![0]!.onDelta('in-flight answer')
+    f.callbacks.get(p.id)![0]!.onDone()
+    await run.done
+    expect(f.host.conversations.state(p.id).messages.at(-1)?.text).toBe('in-flight answer')
+    waiting.resolve()
+    await until(() => f.host.conversations.state(p.id).messages.at(-1)?.text === 'external')
+    expect(f.requests).toHaveLength(1)
+  })
+
+  it('refuses a first-save collision instead of merging two open runtimes', async () => {
+    const f = fixture()
+    f.addEditor('A')
+    const before = { kind: 'legacy-document' as const, projectId: 'default', chatId: 'unsaved-one' }
+    const after = { ...before, chatId: 'saved-one' }
+    const target = await f.execution.capture('A')
+    const p = await f.host.conversations.open(before, target.binding)
+    const q = await f.host.conversations.open(after, target.binding)
+    const original = f.host.conversations.runtime(p)
+    f.host.conversations.edit(p, {
+      composer: { ...f.host.conversations.state(p).composer, text: 'draft' },
+    })
+    f.host.rebindHistory(before, after)
+    expect(f.host.conversations.runtime(p)).toBe(original)
+    expect(f.host.conversations.runtime(p)).not.toBe(f.host.conversations.runtime(q))
+    expect(f.host.conversations.state(p).origin).toEqual(before)
+    expect(f.host.conversations.state(p).error).toContain('Cannot merge')
+    expect(await f.host.submit(p, target.id, [])).toBeNull()
+    expect(f.requests).toEqual([])
+  })
+
   it('accepts cloned UI run handles and rejects another controller, conversation, run or generation', async () => {
     const f = fixture()
     f.addEditor('A')

@@ -18,6 +18,8 @@ import type {
   CodexModelCatalog,
 } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
+import { workspacePanelBridge } from './workspace-panel-bridge'
+import { workspaceMemoryBridge } from './workspace-memory-bridge'
 import { mcpToolsBridge } from '@genoffice/electron-utils/mcp-tools-bridge'
 import { outboundBridge } from '@genoffice/electron-utils/outbound-bridge'
 import { userSkillsBridge } from '@genoffice/electron-utils/user-skills-bridge'
@@ -953,6 +955,8 @@ const tabsApi: TabsApi = {
 }
 
 contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
+contextBridge.exposeInMainWorld('aiOfficeWorkspacePanel', workspacePanelBridge(ipcRenderer))
+contextBridge.exposeInMainWorld('aiOfficeWorkspaceMemory', workspaceMemoryBridge(ipcRenderer))
 
 // Home's entry points into the generate window ("make a new document from these files")
 const generateHomeApi: GenerateHomeApi = {

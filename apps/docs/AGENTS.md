@@ -11,6 +11,8 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 - 문서 에디터의 AI 패널과 skill(`src/renderer/ai/`): `AiPanel.tsx`, `docs-skill.ts`, 도구(`tools.ts`, `*-ops.ts`), 편집 대기 카드(`edit-queue.ts`), 전송(`transport.ts`). AI 창 첨부 칸에는 로컬 파일(끌어다 놓기·`aiAttachTitle`)과 "Google 드라이브에서 첨부"(`DriveAttachButton`), "이음오피스 문서에서 첨부"(`DocAttachButton`, 결정 0035)가 함께 있다. 입력란의 `@` 문서 목록(결정 0051)은 `docMention`(`docMentionActions`)을 `AiComposer`의 `docs`로 넘기고, 같은 첨부 길로 붙인다. 열린 문서 고르기는 `window.aiOfficeDocs`가 있을 때만 나오고, 고른 파일은 드라이브 첨부와 같은 길(`docs:files-*`)로 첨부 칸에 들어간다.
 - 다른 에디터가 쓰는 문서 생성 흐름 `createAiDocument`(시트와 PDF의 AI가 새 docx·pdf·md를 만들 때 이 함수로 들어온다)와 프로젝트 IPC(`registerProjectIpc`).
 
+셸의 공용 작업 화면 기록 서비스도 `getProjectStore()`로 같은 인스턴스를 받는다. 별도 `ProjectStore`를 만들면 첫 답 전 버퍼와 seq가 나뉘므로 공유한다. 기존 문서 기록의 경로/파일 형식과 공용 프로젝트 IPC는 그대로다.
+
 공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문 도구·ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. PM 문서 변경은 내용 없는 변경 알림으로 메인에 전하며, 선택만 옮기는 일은 기존 범위를 바꾸지 않는다. 전용 preload와 `hostWorkspaceEditor`에 연결했으며, 아직 공용 패널이나 모델 실행은 이 경로를 부르지 않는다. 메모·각주·머리말·꼬리말 같은 별도 저장소와 긴 글 작성기·그림·파일·네트워크는 내놓지 않는다. `tests/workspace-adapter.test.ts`는 실제 합성 편집기에서 원래 도구와 결과·추적·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`가 빌드한 앱의 전용 통신을 확인한다.
 
 ## 맡지 않는 것 (경계)
@@ -80,3 +82,5 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 - `claude-code`·`codex` 제공자로 가는 테스트는 브리지를 반드시 mock한다. 안 하면 실제 프로그램이 떠서 개발자의 구독 사용량을 쓴다.
 - Windows에서 `tests/protect-dialog.test.ts`의 "setting a modify password…" 한 건은 변경과 무관하게 실패한다.
 - 실제 화면(쪽 나눔, 인쇄 결과, 어두운 쪽)은 단위 테스트로 다 확인되지 않는다. 빌드한 앱에서 확인한다.
+
+- `legacy-chat-events.ts`는 기존 `project:*`의 참조·추가·첫 저장 결과와 파일 이름 변경을 main 관찰자에 알린다. 본문·경로·모델 호출은 알림에 없고 관찰자 실패는 기존 기록 작업을 바꾸지 않는다. 셸은 이 알림으로 저장 전 문서 대화와 첫 저장 뒤 참조를 연결한다.

@@ -27,6 +27,7 @@ import type {
 } from '../../../main/workspace-ai/execution-controller'
 import {
   WorkspaceConversations,
+  workspaceConversationKey,
   type WorkspaceComposer,
   type WorkspaceConversationRun,
 } from './conversations'
@@ -139,6 +140,9 @@ export class WorkspaceRunHost {
   private restoring = false
   private closed = false
   private active: Work | null = null
+  private readonly dirtyHistory = new Map<string, number>()
+  private readonly historyReads = new Map<string, Promise<void>>()
+  private readonly blockedHistory = new Set<string>()
   private admitting: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly deps: WorkspaceRunHostDeps) {
@@ -155,6 +159,78 @@ export class WorkspaceRunHost {
     }
   }
   version = (): number => this.revision
+  rebindHistory(
+    previous: WorkspaceConversationOrigin,
+    origin: Extract<WorkspaceConversationOrigin, { kind: 'legacy-document' }>,
+  ): void {
+    if (this.closed) return
+    for (const state of this.conversations.list()) {
+      if (workspaceConversationKey(state.origin) !== workspaceConversationKey(previous)) continue
+      try {
+        this.conversations.rebindLegacy(state.id, origin)
+      } catch (error) {
+        this.blockedHistory.add(state.id)
+        this.conversations.historyError(state.id, this.deps.errorText(error))
+        for (const { run } of state.runs) void this.cancel(run)
+      }
+    }
+    this.historyChanged(origin)
+  }
+  /** External records refresh only their original idle conversation, preserving its draft and loop. */
+  historyChanged(origin: WorkspaceConversationOrigin): void {
+    if (this.closed) return
+    for (const state of this.conversations.list()) {
+      if (workspaceConversationKey(state.origin) !== workspaceConversationKey(origin)) continue
+      this.dirtyHistory.set(state.id, (this.dirtyHistory.get(state.id) ?? 0) + 1)
+      void this.refreshHistory(state.id).catch(() => {})
+    }
+  }
+  private async refreshHistory(id: string, queued = false): Promise<void> {
+    const reading = this.historyReads.get(id)
+    if (reading) {
+      await reading
+      return
+    }
+    const version = this.dirtyHistory.get(id)
+    if (!version || this.closed) return
+    const before = this.conversations.state(id)
+    if (before.runs.some((r) => r.status === 'running') || (!queued && before.runs.length)) return
+    const revision = this.conversations.historyRevision(id)
+    let received = false
+    const task = (async () => {
+      const history = await this.deps.load(before.origin)
+      received = true
+      if (this.closed) return
+      const now = this.conversations.state(id)
+      if (
+        this.dirtyHistory.get(id) !== version ||
+        this.conversations.historyRevision(id) !== revision ||
+        workspaceConversationKey(now.origin) !== workspaceConversationKey(before.origin) ||
+        now.runs.some((r) => r.status === 'running')
+      )
+        return
+      this.conversations
+        .runtime(id)
+        .loop.restore(history.messages.map(({ role, text }) => ({ role, text })))
+      this.conversations.replaceHistory(id, history.messages, history.foreign)
+      this.dirtyHistory.delete(id)
+    })()
+    this.historyReads.set(id, task)
+    try {
+      await task
+    } finally {
+      this.historyReads.delete(id)
+      if (
+        received &&
+        !this.closed &&
+        this.dirtyHistory.has(id) &&
+        !this.conversations.state(id).runs.length
+      )
+        queueMicrotask(() => {
+          void this.refreshHistory(id).catch(() => {})
+        })
+    }
+  }
   busy = (): boolean => (this.active !== null && !this.active.finished) || this.restoring
   private notify(): void {
     this.revision++
@@ -250,6 +326,7 @@ export class WorkspaceRunHost {
   resume(request: WorkspacePendingSend): Promise<WorkspaceSubmittedRun | null> {
     if (this.closed) return Promise.reject(new Error('Workspace host is closed'))
     const { conversationId: id, targetId } = request
+    if (this.blockedHistory.has(id)) return Promise.resolve(null)
     const input = structuredClone(request.input)
     if (!input.text.trim() || !input.target) return Promise.resolve(null)
     input.text = sanitizeAgentPayload(input.text)
@@ -329,6 +406,9 @@ export class WorkspaceRunHost {
         if (work.finishing) continue
         this.active = work
         try {
+          await this.refreshHistory(work.ticket.conversationId, true)
+          if (this.dirtyHistory.has(work.ticket.conversationId))
+            throw new Error('Conversation history changed while preparing')
           const state = await this.deps.execution.state(work.binding.runId)
           if (state?.status !== 'queued')
             throw new Error(state?.status === 'stopped' ? state.reason : 'Run is no longer queued')
@@ -399,6 +479,8 @@ export class WorkspaceRunHost {
               this.deps.execution.verifyResponse(work.binding, text, calls),
           }
           work.skill = composeSkills('workspace', '', [document, ...work.preparation.skills])
+          if (this.dirtyHistory.has(work.ticket.conversationId))
+            throw new Error('Conversation history changed while preparing')
           if (!this.conversations.start(work.ticket))
             throw new Error('Conversation execution is not available')
           const messages = this.conversations.state(work.ticket.conversationId).messages
@@ -508,6 +590,7 @@ export class WorkspaceRunHost {
       work.finished = true
       work.resolve()
       this.notify()
+      void this.refreshHistory(id).catch(() => {})
     }
   }
 

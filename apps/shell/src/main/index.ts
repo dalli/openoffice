@@ -10,6 +10,12 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { registerWorkspacePanelIpc, type WorkspacePanelServices } from './workspace-ai/panel-ipc'
+import { WorkspaceConversationHistory } from './workspace-ai/conversation-history'
+import { workspacePanelSources } from './workspace-ai/panel-sources'
+import { WorkspaceLegacySources } from './workspace-ai/legacy-sources'
+import { registerWorkspaceMemoryIpc } from './workspace-ai/memory-ipc'
+import { onLegacyChatEvent } from '../../../docs/src/main/legacy-chat-events'
 import { release } from 'node:os'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import {
@@ -169,6 +175,7 @@ import {
   replaceRecentFile,
   registerAiIpc,
   registerProjectIpc,
+  getProjectStore,
   setStarredGroup,
   toggleStarredFile,
   registerDocsIpc,
@@ -4500,6 +4507,7 @@ function noticeSaveDirFallback(): void {
 
 let shellWindow: BrowserWindow | null = null
 let tabManager: TabManager | null = null
+let workspacePanelIpc: ReturnType<typeof registerWorkspacePanelIpc> | null = null
 
 /**
  * New file from a folder view: the click remembers the folder per kind, the
@@ -5071,6 +5079,7 @@ function createShellWindow(): void {
     win,
     () => {
       win.webContents.send(TABS_CHANNELS.changed, manager.list())
+      workspacePanelIpc?.changed()
       publishOpenDocumentsIfOwner([...manager.openFilePaths(), ...detachedFilePaths()])
       refreshDocumentLinkMenu()
       pushHwpRecoveryTitles(manager)
@@ -5931,6 +5940,14 @@ function projectFolderServices(): ProjectFolderRuntime {
     }),
   })
   const chats = new ProjectChatStore({ guide, trash: (path) => shell.trashItem(path) })
+  chats.onAppended((event) => {
+    workspacePanelIpc?.changed()
+    workspacePanelIpc?.historyChanged({
+      kind: 'project',
+      projectId: event.projectId,
+      chatId: event.chatId,
+    })
+  })
   const scopes = new KbRunScopes()
   const tools = new ProjectFolderTools({
     guide,
@@ -9274,10 +9291,77 @@ ipcMain.handle('ai:open-model-settings', () => {
   tabManager?.openHomeTab()
   win.webContents.send(HOME_CHANNELS.openSettings, { section: 'aiModel' })
 })
+const workspaceLegacySources = new WorkspaceLegacySources()
+onLegacyChatEvent((event) => {
+  workspaceLegacySources.receive(event)
+  if (
+    event.kind === 'resolved' &&
+    event.previous &&
+    tabManager?.tabIdForWebContents(event.sender.id)
+  )
+    workspacePanelIpc?.rebound(
+      { kind: 'legacy-document', ...event.previous },
+      { kind: 'legacy-document', ...event.ref },
+    )
+  if (event.kind === 'appended')
+    workspacePanelIpc?.historyChanged({ kind: 'legacy-document', ...event.ref })
+  workspacePanelIpc?.changed()
+})
 registerProjectIpc()
 registerDocsIpc()
 registerHomeIpc()
 registerProjectFolderChannels()
+// The service is available to an explicitly attached host. Startup reserves no AI space
+// and starts no model; the existing editor panels remain until preparation is migrated.
+const workspaceHistories = new WeakMap<BrowserWindow, WorkspaceConversationHistory>()
+const workspaceServicesFor = (
+  event: Electron.IpcMainInvokeEvent,
+): WorkspacePanelServices | null => {
+  const win = shellWindow
+  const manager = tabManager
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !manager ||
+    event.sender !== win.webContents ||
+    event.senderFrame !== event.sender.mainFrame
+  )
+    return null
+  const runtime = projectFolderServices()
+  const local = getProjectStore()
+  let history = workspaceHistories.get(win)
+  if (!history) {
+    history = new WorkspaceConversationHistory(local, runtime.chats, randomUUID())
+    workspaceHistories.set(win, history)
+  }
+  return {
+    window: win,
+    tabs: manager,
+    history,
+    sources: () =>
+      workspacePanelSources(local, runtime.guide, runtime.chats, [
+        ...workspaceLegacySources.sources((wc) => {
+          const id = manager.tabIdForWebContents(wc.id)
+          return id ? manager.list().find((tab) => tab.id === id)?.title : undefined
+        }),
+        ...history.memoryOrigins().map((origin) => ({ origin, title: '' })),
+      ]),
+    sender: (tabId) => {
+      const tab = manager.workspaceDocuments().find((item) => item.id === tabId)
+      const saved = tabId ? manager.list().find((item) => item.id === tabId)?.filePath : null
+      return {
+        editor:
+          tab?.kind === 'docs' || tab?.kind === 'markdown' || tab?.kind === 'hwp'
+            ? tab.kind
+            : 'home',
+        docPath: saved ?? null,
+        key: win.webContents.id,
+      }
+    },
+  }
+}
+workspacePanelIpc = registerWorkspacePanelIpc(ipcMain, workspaceServicesFor)
+registerWorkspaceMemoryIpc(ipcMain, workspaceServicesFor, () => workspacePanelIpc?.changed())
 registerIntegrationsIpc({
   settingsPath: APP_SETTINGS_PATH,
   window: () => shellWindow,

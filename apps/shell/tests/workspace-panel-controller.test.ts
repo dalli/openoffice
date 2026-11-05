@@ -44,6 +44,24 @@ function fixture(patch: Partial<WorkspacePanelDeps> = {}) {
 }
 
 describe('workspace panel selection ownership', () => {
+  it('keeps a newly created source unique when the main catalog refresh arrives before creation finishes', async () => {
+    const f = fixture({
+      create: async () => {
+        f.controller.catalog(f.controller.documentList(), [
+          ...f.controller.sourceList(),
+          source('new'),
+        ])
+        return source('new')
+      },
+    })
+    await f.controller.create()
+    expect(
+      f.controller
+        .sourceList()
+        .filter((item) => item.origin.kind === 'workspace' && item.origin.conversationId === 'new'),
+    ).toHaveLength(1)
+  })
+
   it('opens source histories without a model call or a document read; only new conversations propose the focused target', async () => {
     const f = fixture()
     await f.controller.open(source('P'))

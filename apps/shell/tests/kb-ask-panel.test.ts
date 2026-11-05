@@ -21,6 +21,7 @@ import type { HomeApi } from '../src/shared/home-api'
 import { KbAskPanel } from '../src/renderer/src/KbAskPanel'
 import { LocaleProvider } from '../src/renderer/src/locale'
 import { strings } from '../src/renderer/src/strings'
+import type { WorkspaceMemoryHost } from '../src/shared/workspace-memory-api'
 import type { SubscriptionConnection } from '../src/renderer/src/subscription-client'
 
 /**
@@ -76,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount())
+  delete window.aiOfficeWorkspaceMemory
   host.remove()
 })
 
@@ -459,5 +461,35 @@ describe('ask panel with a local model', () => {
     const request = aiStream.mock.calls[0]![0]
     expect(request.tools.length).toBeGreaterThan(0)
     expect(request.system).not.toContain(TOOLS_UNAVAILABLE_NOTE)
+  })
+})
+
+describe('original home memory host', () => {
+  it('leases the transcript, updates its actual UI and model, and blocks legacy sends until released', async () => {
+    let memory!: WorkspaceMemoryHost
+    const release = vi.fn(() => memory.release())
+    window.aiOfficeWorkspaceMemory = {
+      register: vi.fn(async (host) => {
+        memory = host
+        return release
+      }),
+    }
+    stored.subscriptionNoticeSeen = true
+    await renderPanel({ connection: connectionOf(statuses('ready', 'ready')) })
+    await act(async () => {
+      expect(memory.load()).toEqual([])
+      memory.append({ role: 'user', text: 'workspace question' })
+      memory.append({ role: 'assistant', text: 'workspace answer' })
+    })
+    expect(host.textContent).toContain('workspace answer')
+    await type(QUESTION)
+    await send()
+    expect(aiStream).not.toHaveBeenCalled()
+    expect(composer().value).toBe(QUESTION)
+    act(() => memory.release())
+    await send()
+    expect(aiStream).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(aiStream.mock.calls[0])).toContain('workspace answer')
+    expect(() => memory.load()).toThrow('busy')
   })
 })

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { homeMemoryHost } from './workspace-ai/home-memory-host'
+import type { ChatMessage } from '@genoffice/project-store'
 import {
   AgentLoop,
   CREATE_DOCUMENT_TOOL,
@@ -134,6 +136,8 @@ import sendStop from './assets/send-stop.png'
 const HOME_EDITOR: ProjectEditor = 'home'
 
 interface AskMessage {
+  /** Metadata for messages appended through the original home history host. */
+  history?: ChatMessage
   role: 'user' | 'assistant'
   text: string
   toolNotes: ToolNote[]
@@ -202,6 +206,9 @@ export function KbAskPanel({
   const [messages, setMessages] = useState<AskMessage[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const homeSendRef = useRef(false)
+  const homeClaimedRef = useRef(false)
+  const [homeClaimed, setHomeClaimed] = useState(false)
   const [corpusCount, setCorpusCount] = useState<number | null>(null)
   const corpusRef = useRef<KbFileInfo[]>([])
   const settingsRef = useRef<AiSettings | null>(null)
@@ -297,6 +304,59 @@ export function KbAskPanel({
     create: t('askToolCreate'),
   })
 
+  useEffect(() => {
+    const api = window.aiOfficeWorkspaceMemory
+    if (!api) return
+    let disposed = false
+    let off: (() => void) | undefined
+    const host = homeMemoryHost({
+      busy: () =>
+        !showingProjectRef.current &&
+        (homeSendRef.current ||
+          runActiveRef.current ||
+          !!heldRef.current ||
+          !!loopRef.current?.busy),
+      messages: () =>
+        showingProjectRef.current ? (memoryChatRef.current?.messages ?? []) : messagesRef.current,
+      locked(value) {
+        homeClaimedRef.current = value
+        if (!disposed) setHomeClaimed(value)
+      },
+      append(message) {
+        const next: AskMessage = {
+          role: message.role,
+          text: message.text,
+          history: message,
+          toolNotes: storedToolNotes(message.tools, toolLabels()),
+          ...(message.skills ? { skills: message.skills } : {}),
+        }
+        if (showingProjectRef.current) {
+          const kept = memoryChatRef.current ?? { messages: [], model: [] }
+          kept.messages = [...kept.messages, next]
+          kept.model = [...kept.model, { role: message.role, text: message.text }]
+          memoryChatRef.current = kept
+        } else {
+          messagesRef.current = [...messagesRef.current, next]
+          setMessages(messagesRef.current)
+          const loop = loopRef.current
+          loop?.restore([...(loop.messages ?? []), { role: message.role, text: message.text }])
+        }
+      },
+    })
+    void api
+      .register(host)
+      .then((release) => {
+        if (disposed) release()
+        else off = release
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      off?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one original host per mounted home panel
+  }, [])
+
   const askMessageOf = (entry: ProjectChatEntry): AskMessage => ({
     role: entry.role,
     text: entry.text,
@@ -315,6 +375,7 @@ export function KbAskPanel({
     endRunScope()
     void projectChatRef.current.finishSend()
     setBusy(false)
+    homeSendRef.current = false
   }
 
   /** the project chat hook opened a chat, or went back to "no project" */
@@ -576,6 +637,7 @@ export function KbAskPanel({
           }))
           // onError is the loop's last word on a run: the composer takes questions again
           setBusy(false)
+          homeSendRef.current = false
         },
       },
     })
@@ -608,6 +670,7 @@ export function KbAskPanel({
       return [...prev.slice(0, -1), { ...last, streaming: false }]
     })
     setBusy(false)
+    homeSendRef.current = false
   }
 
   /** `again`: a question asked before, sent once more; `known`: settings just written, ahead of the props;
@@ -618,7 +681,7 @@ export function KbAskPanel({
     skillUse: SkillUse = NO_SKILL_USE,
   ): Promise<void> => {
     const instruction = (again ?? draft).trim()
-    if (!instruction || busy) return
+    if (!instruction || busy || (!showingProjectRef.current && homeClaimedRef.current)) return
     const gate = askSendGate(known ?? aiSettings, connection.statuses, noticeDue)
     heldRef.current = gate === 'checking' ? instruction : null
     heldSkillUseRef.current = gate === 'checking' ? skillUse : NO_SKILL_USE
@@ -643,6 +706,7 @@ export function KbAskPanel({
       toolNotes: [],
       ...(skillUse.chips.length > 0 ? { skills: skillUse.chips } : {}),
     }
+    homeSendRef.current = true
     setBusy(true)
     refreshSettings()
     const seq = ++askSeqRef.current
@@ -655,6 +719,7 @@ export function KbAskPanel({
         { role: 'assistant', text, toolNotes: [], ...(isError ? { isError: true } : {}) },
       ])
       setBusy(false)
+      homeSendRef.current = false
     }
     // a narrowed ask: main mints this run's scope for the chosen group and keeps
     // every call of the run inside it. A group that has no files any more runs
@@ -1287,6 +1352,7 @@ export function KbAskPanel({
       <AiComposer
         value={draft}
         busy={busy}
+        sendDisabled={!showingProjectRef.current && homeClaimed}
         placeholder={askPlaceholder}
         hintIdle={t('askHintIdle')}
         hintBusy={t('askHintBusy')}

@@ -1,6 +1,6 @@
 import type { DocumentTabKind } from './tabs-api'
 
-/** Main-owned run contracts. The shared panel API is not registered yet. */
+/** Main-owned run contracts, shared with the private shell panel bridge. */
 export interface WorkspaceAiOwner {
   readonly windowId: number
   readonly panelContentsId: number
@@ -147,3 +147,16 @@ export type WorkspaceConversationOrigin =
       readonly conversationId: string
     }
   | { readonly kind: 'workspace'; readonly conversationId: string }
+
+/** Titles, paths and document focus never form a conversation identity. */
+export function workspaceConversationKey(origin: WorkspaceConversationOrigin): string {
+  switch (origin.kind) {
+    case 'legacy-document':
+    case 'project':
+      return JSON.stringify([origin.kind, origin.projectId, origin.chatId])
+    case 'workspace':
+      return JSON.stringify([origin.kind, origin.conversationId])
+    case 'window-memory':
+      return JSON.stringify([origin.kind, origin.windowSessionId, origin.conversationId])
+  }
+}

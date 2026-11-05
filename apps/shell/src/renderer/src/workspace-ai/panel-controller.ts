@@ -1,28 +1,18 @@
 import type { WorkspaceReadRequest } from '@genoffice/agent-core'
-import type { WorkspaceConversationOrigin } from '../../../shared/workspace-ai-api'
-import type { DocumentTabKind } from '../../../shared/tabs-api'
+import type {
+  WorkspacePanelDocument,
+  WorkspacePanelSource,
+} from '../../../shared/workspace-panel-api'
+export type {
+  WorkspacePanelDocument,
+  WorkspacePanelSource,
+} from '../../../shared/workspace-panel-api'
 import type {
   WorkspaceCapture,
   WorkspaceReferenceCapture,
 } from '../../../main/workspace-ai/execution-controller'
 import { workspaceConversationKey } from './conversations'
 import type { WorkspaceRunHost } from './run-host'
-
-export interface WorkspacePanelDocument {
-  id: string
-  title: string
-  kind: DocumentTabKind
-  /** Display metadata only. Availability must come from the owning main host. */
-  available: boolean
-  active?: boolean
-  pane?: 'left' | 'right' | 'top' | 'bottom'
-}
-
-export interface WorkspacePanelSource {
-  origin: WorkspaceConversationOrigin
-  title: string
-  projectTitle?: string
-}
 
 interface Selection {
   target: WorkspaceCapture | null
@@ -140,7 +130,13 @@ export class WorkspacePanelController {
     try {
       const source = await this.deps.create()
       if (this.closed) return
-      this.sources.push(structuredClone(source))
+      if (
+        !this.sources.some(
+          (item) =>
+            workspaceConversationKey(item.origin) === workspaceConversationKey(source.origin),
+        )
+      )
+        this.sources.push(structuredClone(source))
       const id = await this.host.conversations.open(source.origin)
       if (this.closed) return
       if (epoch === this.opening) this.host.conversations.select(id)
