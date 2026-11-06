@@ -1,3 +1,4 @@
+import type { DocsWorkspaceAiEntry } from './workspace-ai-entry'
 export interface OpenFileResult {
   path: string
   name: string
@@ -448,6 +449,7 @@ export interface DesktopApi {
   getAuthorName(): Promise<string>
   onAuthorNameChanged(handler: (name: string) => void): () => void
   /** AI panel text size + chat-input spellcheck (Settings → General in the shell) */
+  workspaceAiEntry?(entry: DocsWorkspaceAiEntry): Promise<boolean | 'rejected'>
   getAiPanelPrefs(): Promise<AiPanelPrefs>
   setAiPanelPrefs(patch: Partial<AiPanelPrefs>): Promise<AiPanelPrefs>
   onAiPanelPrefsChanged(handler: (prefs: AiPanelPrefs) => void): () => void
@@ -592,6 +594,7 @@ export interface DesktopApi {
     defaultName: string,
     format: DocFormat,
     data: ArrayBuffer,
+    expectedProjectId?: string,
   ): Promise<{
     ok: boolean
     path?: string

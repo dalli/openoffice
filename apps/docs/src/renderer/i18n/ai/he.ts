@@ -34,6 +34,8 @@ export const he = {
   aiChipChartData: 'עדכון נתוני התרשים',
   aiChipChartTitle: 'שינוי כותרת התרשים',
   aiChipTableEdit: 'התאמת שורות/עמודות',
+  aiQueueTransferFailed:
+    'לא ניתן להעביר את בקשות העריכה. התור נשמר ללא שינוי. יש לבדוק את המסמך ולשלוח שוב.',
   aiQueueTitle: 'שינויים בתור',
   aiQueueHint: 'לחץ על שורה כדי לאתר את הקטע; שליחה מחילה את כל השינויים בבקשה אחת',
   aiQueueSend: 'שלח {count} שינויים',

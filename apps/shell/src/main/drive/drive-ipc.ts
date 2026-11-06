@@ -4,7 +4,7 @@
  * Drive files, and the AI's read-only access. The screens get state and file
  * lists; tokens never leave this process.
  */
-import { join } from 'node:path'
+import { join, relative, isAbsolute, sep } from 'node:path'
 import {
   app,
   dialog,
@@ -82,6 +82,7 @@ export interface DriveIpcDeps {
 export interface DriveService {
   /** a local path is a copy of a Drive file: reopen through Drive so a stale copy is refreshed */
   reopen(path: string): Promise<boolean> | null
+  ai: import('../workspace-ai/drive').WorkspaceDriveServices
   stop(): void
 }
 
@@ -372,7 +373,7 @@ export function registerDriveIpc(deps: DriveIpcDeps): DriveService {
 
   ipcMain.handle(DRIVE_CHANNELS.connected, (): boolean => connection.connected())
 
-  ipcMain.handle(DRIVE_CHANNELS.pickAttachments, async (): Promise<DriveAttachResult> => {
+  const pickAttachments = async (): Promise<DriveAttachResult> => {
     // asked before the picker opens, so nothing is fetched for an AI that may train on it
     if (connection.connected() && deps.freeAi()) return { ok: false, reason: 'free-ai' }
     const result = await pickFiles()
@@ -386,13 +387,19 @@ export function registerDriveIpc(deps: DriveIpcDeps): DriveService {
       return { ok: false, reason: kept ? reason : 'failed' }
     }
     if (result.picked.length === 0) return { ok: false, reason: 'cancelled' }
+    if (deps.freeAi()) return { ok: false, reason: 'free-ai' }
+    if (!trainingAck(deps.settingsPath())) return { ok: false, reason: 'training' }
     const got = await downloadPicks(
       connection.api,
       result.picked,
       join(app.getPath('temp'), 'ieumoffice-drive-attach'),
     )
+    if (deps.freeAi()) return { ok: false, reason: 'free-ai' }
+    if (!trainingAck(deps.settingsPath())) return { ok: false, reason: 'training' }
+    if (!connection.connected()) return { ok: false, reason: 'not-connected' }
     return { ok: true, ...got }
-  })
+  }
+  ipcMain.handle(DRIVE_CHANNELS.pickAttachments, pickAttachments)
 
   ipcMain.handle(DRIVE_CHANNELS.open, async (_event, fileId: unknown): Promise<DriveOpenResult> => {
     if (typeof fileId !== 'string' || !/^[\w-]{1,200}$/.test(fileId)) {
@@ -408,24 +415,43 @@ export function registerDriveIpc(deps: DriveIpcDeps): DriveService {
 
   ipcMain.handle(DRIVE_CHANNELS.aiEnabled, (): boolean => aiEnabled())
 
-  ipcMain.handle(DRIVE_CHANNELS.aiSearch, async (_event, raw: unknown) => {
+  const search = async (raw: unknown) => {
     if (!aiEnabled()) return { ok: false, error: 'Google Drive is not available now.' }
     if (deps.freeAi()) return { ok: false, error: FREE_AI_REFUSAL }
     const r = (raw && typeof raw === 'object' ? raw : {}) as { q?: unknown; limit?: unknown }
     const limit = Math.min(Math.max(1, Math.floor(Number(r.limit) || 10)), SEARCH_LIMIT_MAX)
     return ai.search(typeof r.q === 'string' ? r.q : '', limit)
-  })
+  }
+  ipcMain.handle(DRIVE_CHANNELS.aiSearch, (_event, raw: unknown) => search(raw))
 
-  ipcMain.handle(DRIVE_CHANNELS.aiRead, async (_event, raw: unknown) => {
+  const read = async (raw: unknown) => {
     if (!aiEnabled()) return { ok: false, error: 'Google Drive is not available now.' }
     if (deps.freeAi()) return { ok: false, error: FREE_AI_REFUSAL }
     const r = (raw && typeof raw === 'object' ? raw : {}) as { id?: unknown; offset?: unknown }
     const id = typeof r.id === 'string' ? r.id : ''
     if (!/^[\w-]{1,200}$/.test(id)) return { ok: false, error: 'not a Drive file id' }
     return ai.read(id, Number(r.offset) || 0)
-  })
+  }
+  ipcMain.handle(DRIVE_CHANNELS.aiRead, (_event, raw: unknown) => read(raw))
 
   return {
+    ai: {
+      status: () => ({
+        connected: connection.connected(),
+        enabled: aiEnabled() && !deps.freeAi(),
+        allowed: trainingAck(deps.settingsPath()) && !deps.freeAi(),
+      }),
+      search: (query, limit) => search({ q: query, limit }),
+      read: (id, offset) => read({ id, offset }),
+      pick: pickAttachments,
+      isDrivePath: (path) => {
+        const rel = relative(join(app.getPath('temp'), 'ieumoffice-drive-attach'), path)
+        return (
+          !!files.entryFor(path) ||
+          (!!rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+        )
+      },
+    },
     reopen(path) {
       const entry = files.entryFor(path)
       if (!entry) return null

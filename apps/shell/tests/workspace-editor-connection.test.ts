@@ -50,6 +50,31 @@ function fixture() {
 }
 
 describe('main-owned workspace editor connection', () => {
+  it.each([
+    { fileName: '../outside.docx', title: 'outside', redacted: false, bytes: null },
+    { fileName: 'form.docx', title: 'form', redacted: true, bytes: new Uint8Array([1]) },
+    { fileName: 'form.docx', title: 'form', redacted: false, bytes: [1, 2] },
+  ])('rejects an unsafe template response: $fileName', async (snapshot) => {
+    const f = fixture()
+    const read = f.connection.request({
+      kind: 'template',
+      state: { instanceId: 'A', revision: '1', selectionId: null, readOnly: false },
+      mode: 'as-is',
+    })
+    f.reply(f.sent().id, snapshot)
+    await expect(read).rejects.toMatchObject({ kind: 'wrong-response' })
+  })
+  it.each(['instanceId', 'selectionId'] as const)(
+    'rejects renewal that replaces the pinned %s',
+    async (key) => {
+      const f = fixture()
+      const state = { instanceId: 'A', revision: '1', selectionId: 'pinned', readOnly: false }
+      const pending = f.connection.request({ kind: 'refresh', state })
+      f.reply(f.sent().id, { ...state, revision: '2', [key]: 'replacement' })
+      await expect(pending).rejects.toMatchObject({ kind: 'wrong-response' })
+    },
+  )
+
   it('accepts metadata changes only from its main frame and invalidates a replaced renderer host', async () => {
     const host = fixture()
     const changed = vi.fn()

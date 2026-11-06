@@ -35,6 +35,8 @@ export const en = {
   aiChipChartData: 'Update chart data',
   aiChipChartTitle: 'Change chart title',
   aiChipTableEdit: 'Adjust rows/columns',
+  aiQueueTransferFailed:
+    'Could not transfer the edits. Your queue is unchanged. Check the document and send again.',
   aiQueueTitle: 'Queued edits',
   aiQueueHint: 'Click a row to locate its passage; sending applies all edits as one request',
   aiQueueSend: 'Send {count} edits',

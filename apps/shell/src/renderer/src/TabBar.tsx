@@ -120,7 +120,7 @@ export function renamedFileName(currentPath: string, typedName: string): string 
 interface TabBarProps {
   /** the window's two-pane split; its tab ids decide the pane markers */
   split: SplitViewState | null
-  workspacePanel?: { open: boolean; toggle(): void } | undefined
+  workspacePanel?: { open: boolean; toggle(): void; title?: string | undefined } | undefined
 }
 
 export function TabBar({ split, workspacePanel }: TabBarProps) {
@@ -650,7 +650,7 @@ export function TabBar({ split, workspacePanel }: TabBarProps) {
           type="button"
           className="tab-split-btn"
           aria-label={aiSubscriptionText(lang, 'aiAssistant')}
-          title={aiSubscriptionText(lang, 'aiAssistant')}
+          title={workspacePanel.title ?? aiSubscriptionText(lang, 'aiAssistant')}
           aria-pressed={workspacePanel.open}
           onClick={workspacePanel.toggle}
         >

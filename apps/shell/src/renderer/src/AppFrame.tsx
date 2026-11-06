@@ -7,6 +7,7 @@ import type { ViewportSize } from './split-view-geometry'
 import { SplitDivider } from './SplitDivider'
 import { TabBar } from './TabBar'
 import { useSubscriptionConnection } from './subscription-client'
+import type { SubscriptionConnection } from './subscription-client'
 import { workspaceUiScale } from '../../shared/workspace-layout'
 import type { WorkspacePanelMount } from './workspace-ai/WorkspacePanel'
 
@@ -19,6 +20,8 @@ interface AppFrameProps {
   initialOnboardingSeen: boolean
   /** Installed only by a host with guarded services and a main-acknowledged panel reservation. */
   workspace?: WorkspacePanelMount
+  workspaceToggle?: { open: boolean; toggle(): void; title?: string | undefined } | undefined
+  onOnboardingFinished?: () => void
 }
 
 /** The shell renderer's viewport: the same CSS px space the pane bounds use. */
@@ -65,7 +68,18 @@ function useSplitView(): SplitViewState | null {
   return split
 }
 
-export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
+export function AppFrame(props: AppFrameProps) {
+  const connection = useSubscriptionConnection()
+  return <AppFrameView {...props} connection={connection} />
+}
+
+export function AppFrameView({
+  initialOnboardingSeen,
+  workspace,
+  workspaceToggle,
+  onOnboardingFinished,
+  connection,
+}: AppFrameProps & { connection: SubscriptionConnection }) {
   const [homeActive, setHomeActive] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(!initialOnboardingSeen)
   const split = useSplitView()
@@ -75,7 +89,6 @@ export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
     : viewport
   // one live view of the subscription connection for the home screen, the
   // onboarding and the first-connection notice
-  const connection = useSubscriptionConnection()
   const notice = useFirstConnectionNotice(connection.statuses)
 
   useEffect(() => {
@@ -92,6 +105,7 @@ export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
       const persisted = await window.aiOffice.setOnboardingSeen()
       if (!persisted) return false
       setShowOnboarding(false)
+      onOnboardingFinished?.()
       return true
     } catch {
       return false
@@ -103,12 +117,13 @@ export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
       <TabBar
         split={split}
         workspacePanel={
-          workspace
+          workspaceToggle ??
+          (workspace
             ? {
                 open: workspace.layout.panelMode === 'open',
                 toggle: () => workspace.setOpen(workspace.layout.panelMode !== 'open'),
               }
-            : undefined
+            : undefined)
         }
       />
       {/* divider sits in the gap between the two pane views — the one slice of
@@ -119,11 +134,17 @@ export function AppFrame({ initialOnboardingSeen, workspace }: AppFrameProps) {
        * by the main process to cover this area — only Home paints its own content here. */}
       <div
         className="app-frame-content"
+        data-workspace={workspace ? '' : undefined}
         style={{
           visibility: homeActive ? 'visible' : 'hidden',
           ...(workspace && {
             marginLeft: workspace.layout.documents.x / workspaceUiScale(workspace.uiScale),
             width: workspace.layout.documents.width / workspaceUiScale(workspace.uiScale),
+            height:
+              (workspace.layout.documents.y + workspace.layout.documents.height) /
+              workspaceUiScale(workspace.uiScale),
+            boxSizing: 'border-box',
+            overflow: 'hidden',
           }),
         }}
       >

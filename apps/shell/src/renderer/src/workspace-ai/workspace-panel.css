@@ -18,6 +18,10 @@
   font-size: 13px;
 }
 
+html[data-ai-font-size] .workspace-ai-transcript {
+  zoom: var(--ai-font-zoom, 1);
+}
+
 .workspace-ai-header,
 .workspace-ai-row {
   display: flex;
@@ -30,7 +34,7 @@
   justify-content: space-between;
 }
 
-.workspace-ai-panel button,
+.workspace-ai-panel button:not(:where(.ai-queue button)),
 .workspace-ai-panel select {
   font: inherit;
   min-width: 0;
@@ -57,6 +61,33 @@
 .workspace-ai-grow {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-ai-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.workspace-ai-writing {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.workspace-ai-writing p {
+  margin: 0 0 8px;
+}
+
+.workspace-ai-writing button {
+  margin-inline-end: 6px;
+  padding: 4px 10px;
+}
+
+.workspace-ai-quick-actions button {
+  flex: 1 1 40%;
+  padding: 4px 8px;
   overflow-wrap: anywhere;
 }
 
@@ -90,6 +121,13 @@
 
 .workspace-ai-message-user {
   font-weight: 600;
+}
+
+.workspace-ai-skill-save {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
 }
 
 .workspace-ai-work {
@@ -135,4 +173,15 @@
 .workspace-ai-rail-work {
   display: flex;
   flex-direction: column;
+}
+
+.workspace-ai-attachments {
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.workspace-ai-attachments .workspace-ai-grow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

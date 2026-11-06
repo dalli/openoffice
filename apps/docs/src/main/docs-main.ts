@@ -76,6 +76,7 @@ import {
   type RecoveryIdentity,
 } from '@genoffice/electron-utils'
 import { aiRunRefusal } from '@genoffice/electron-utils/ai-run-guard'
+
 import {
   configureExtraFontDirs,
   configureMetricsCache,
@@ -3855,7 +3856,7 @@ function statAttachment(filePath: string): { meta?: AttachmentMeta; error?: stri
   }
 }
 
-function collectAttachments(paths: string[]): AttachmentAddResult {
+export function collectAttachments(paths: string[]): AttachmentAddResult {
   const accepted: AttachmentMeta[] = []
   const rejected: string[] = []
   for (const p of paths) {
@@ -3888,7 +3889,7 @@ function prunePastedImages(dir: string): void {
     // ignore: directory may not exist yet
   }
 }
-function savePastedImage(data: unknown, ext: unknown): string | null {
+export function savePastedImage(data: unknown, ext: unknown): string | null {
   const cleanExt = typeof ext === 'string' ? ext.toLowerCase() : ''
   if (!ATTACHABLE_IMAGE_EXTS.has(cleanExt)) return null
   const bytes =
@@ -3931,6 +3932,50 @@ async function extractAttachmentText(filePath: string): Promise<string> {
   return parsed.text
 }
 
+/** Shared by the existing editor IPC and the guarded workspace attachment service. */
+export async function readAttachmentText(
+  filePath: string,
+  offset: number,
+  maxChars: number,
+): Promise<AttachmentReadResult> {
+  const name = basename(filePath)
+  const ext = diagramPictureExtOf(filePath) ?? name.split('.').pop()?.toLowerCase() ?? ''
+  if (!ATTACHABLE_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
+  if (ATTACHABLE_IMAGE_EXTS.has(ext)) {
+    return { ok: false, error: tm('errImageNoText') }
+  }
+  try {
+    const text = await extractAttachmentText(filePath)
+    const start = Math.max(0, Math.floor(offset) || 0)
+    const size = Math.min(Math.max(1, Math.floor(maxChars) || 1), 48_000)
+    return {
+      ok: true,
+      name,
+      totalChars: text.length,
+      offset: start,
+      text: text.slice(start, start + size),
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+export function readAttachmentImage(filePath: string): AttachmentImageResult {
+  const name = basename(filePath)
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  const mime = ATTACHMENT_IMAGE_MIME[ext]
+  if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
+  try {
+    const stat = statSync(filePath)
+    if (stat.size > ATTACHABLE_IMAGE_MAX_BYTES) {
+      return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
+    }
+    return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
+  } catch {
+    return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
+  }
+}
+
 // ---- print / export PDF ----
 
 const TWIPS_PER_INCH = 1440
@@ -3944,6 +3989,22 @@ const SETTINGS_PATH = () => userDataPath('ai-settings.json')
 /** how long after start the key providers are first asked for their models */
 const KEY_MODEL_FIRST_LIST_DELAY_MS = 5000
 
+let workspaceAiStream: (
+  sender: WebContents,
+  request: AiStreamRequest,
+  signal: AbortSignal,
+  send: (chunk: AiStreamChunk) => void,
+) => Promise<void>
+
+/** Uses this app's stored selection and the same guarded streaming entry as editor panels. */
+export function streamWorkspaceAi(
+  sender: WebContents,
+  request: Omit<AiStreamRequest, 'settings'>,
+  signal: AbortSignal,
+  send: (chunk: AiStreamChunk) => void,
+): Promise<void> {
+  return workspaceAiStream(sender, { ...request, settings: storedAiSettings() }, signal, send)
+}
 const activeAiStreams = new Map<string, AbortController>()
 
 /** AI requests in flight across every editor (the shell's memory record reads it) */
@@ -4138,14 +4199,22 @@ export function registerAiIpc(): void {
     cancelLocalTestForIpc(input, event.sender.id),
   )
 
-  ipcMain.handle('ai:stream', async (event, request: AiStreamRequest) => {
+  const streamAi = async (
+    event: { sender: WebContents },
+    request: AiStreamRequest,
+    signal?: AbortSignal,
+    deliver?: (chunk: AiStreamChunk) => void,
+  ) => {
     // per-request settings get the same schema check as the persisted ones: a
     // compromised renderer could otherwise hand cliPath/baseUrl straight to
     // the provider layer without ever touching the settings file
     const { requestId, system, messages } = request
     const send = (chunk: AiStreamChunk) => {
-      if (!event.sender.isDestroyed()) event.sender.send('ai:stream-chunk', chunk)
+      if (event.sender.isDestroyed()) return
+      if (deliver) deliver(chunk)
+      else event.sender.send('ai:stream-chunk', chunk)
     }
+    if (signal?.aborted) return
     // the selection decides, and nothing stands in for a provider that cannot run:
     // the refusal names its cause so the renderer shows how to connect instead
     const target = resolveAiRun(request.settings, sharedSubscriptionStatuses(), AI_RUN_TEXTS)
@@ -4170,6 +4239,9 @@ export function registerAiIpc(): void {
     const localTimeoutMs =
       localEndpoint?.kind === 'local' ? localEndpointTimeoutMs(localEndpoint) : undefined
     const controller = new AbortController()
+    const stop = () => controller.abort()
+    signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) controller.abort()
     activeAiStreams.set(requestId, controller)
     const unwatchSender = abortOnDestroyed(event.sender, controller)
     // deltas go out in short batches, everything else in order behind them
@@ -4238,9 +4310,12 @@ export function registerAiIpc(): void {
       keepalive?.stop()
       out.flush()
       unwatchSender()
+      signal?.removeEventListener('abort', stop)
       activeAiStreams.delete(requestId)
     }
-  })
+  }
+  workspaceAiStream = (sender, request, signal, send) => streamAi({ sender }, request, signal, send)
+  ipcMain.handle('ai:stream', (event, request: AiStreamRequest) => streamAi(event, request))
 
   ipcMain.handle('ai:stream-cancel', (event, requestId: string, scope?: unknown) => {
     activeAiStreams.get(requestId)?.abort()
@@ -5332,7 +5407,13 @@ export function registerDocsIpc(): void {
   // bookkeeping once written.
   ipcMain.handle(
     'docs:save-into-project',
-    async (event, defaultName: unknown, format: unknown, data: unknown) => {
+    async (
+      event,
+      defaultName: unknown,
+      format: unknown,
+      data: unknown,
+      expectedProjectId?: unknown,
+    ) => {
       const wcId = event.sender.id
       const write = shellHooks?.writeNewDocument
       // an orphaned renderer, or a document that has its file already
@@ -5342,6 +5423,13 @@ export function registerDocsIpc(): void {
       if (typeof defaultName !== 'string' || !(data instanceof ArrayBuffer)) {
         return { ok: false, error: 'bad save request' }
       }
+      if (
+        expectedProjectId !== undefined &&
+        (typeof expectedProjectId !== 'string' ||
+          !expectedProjectId ||
+          expectedProjectId.length > 128)
+      )
+        return { ok: false, error: 'bad save request' }
       const extension = format === 'odt' ? '.odt' : '.docx'
       const named = basename(defaultName.replace(/\\/g, '/')).replace(/\.(docx|odt)$/i, '')
       const fileName = `${sanitizeAiDocFileBase(named)}${extension}`
@@ -5353,7 +5441,7 @@ export function registerDocsIpc(): void {
           null,
         )
         if (tornDownWcIds.has(wcId)) return { ok: false }
-        const filePath = await write(wcId, fileName, bytes)
+        const filePath = await write(wcId, fileName, bytes, expectedProjectId)
         if (!filePath) return { ok: false, skipped: true }
         // the tab closed while the write was in flight: the file is freshly
         // created, so rolling it back is safe (mirrors docs:save-new)
@@ -5555,53 +5643,10 @@ export function registerDocsIpc(): void {
 
   ipcMain.handle('files:add', (_event, paths: string[]) => collectAttachments(paths))
 
-  ipcMain.handle(
-    'files:read',
-    async (
-      _event,
-      filePath: string,
-      offset: number,
-      maxChars: number,
-    ): Promise<AttachmentReadResult> => {
-      const name = basename(filePath)
-      const ext = diagramPictureExtOf(filePath) ?? name.split('.').pop()?.toLowerCase() ?? ''
-      if (!ATTACHABLE_EXTS.has(ext)) return { ok: false, error: tm('errUnsupportedExt', { ext }) }
-      if (ATTACHABLE_IMAGE_EXTS.has(ext)) {
-        return { ok: false, error: tm('errImageNoText') }
-      }
-      try {
-        const text = await extractAttachmentText(filePath)
-        const start = Math.max(0, Math.floor(offset) || 0)
-        const size = Math.min(Math.max(1, Math.floor(maxChars) || 1), 48_000)
-        return {
-          ok: true,
-          name,
-          totalChars: text.length,
-          offset: start,
-          text: text.slice(start, start + size),
-        }
-      } catch (e) {
-        return { ok: false, error: e instanceof Error ? e.message : String(e) }
-      }
-    },
+  ipcMain.handle('files:read', (_event, filePath: string, offset: number, maxChars: number) =>
+    readAttachmentText(filePath, offset, maxChars),
   )
-
-  // image attachments read raw bytes → base64; AiPanel puts them into the user message's images for multimodal
-  ipcMain.handle('files:read-image', (_event, filePath: string): AttachmentImageResult => {
-    const name = basename(filePath)
-    const ext = name.split('.').pop()?.toLowerCase() ?? ''
-    const mime = ATTACHMENT_IMAGE_MIME[ext]
-    if (!mime) return { ok: false, error: `${name}: ${tm('errNotImage')}` }
-    try {
-      const stat = statSync(filePath)
-      if (stat.size > ATTACHABLE_IMAGE_MAX_BYTES) {
-        return { ok: false, error: `${name}: ${tm('errImageTooLarge')}` }
-      }
-      return { ok: true, base64: readFileSync(filePath).toString('base64'), mime }
-    } catch {
-      return { ok: false, error: `${name}: ${tm('errUnreadable')}` }
-    }
-  })
+  ipcMain.handle('files:read-image', (_event, filePath: string) => readAttachmentImage(filePath))
 
   // clipboard-pasted images (screenshots and other bitmaps with no local path): saved to a temp file then use the regular attachment path
   ipcMain.handle(
@@ -6026,6 +6071,7 @@ interface DocsShellHooks {
     webContentsId: number,
     fileName: string,
     bytes: Uint8Array,
+    expectedProjectId?: string,
   ): Promise<string | null>
 }
 let shellHooks: DocsShellHooks | null = null

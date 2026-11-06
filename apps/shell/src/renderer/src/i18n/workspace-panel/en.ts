@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const en = {
+  sendScope:
+    'Sending a request shares the edit target’s content and your chosen reference scopes, attachments, skills and project context with the selected AI.',
+  attachmentLimit: 'Attach up to 20 files per message.',
+  polishPrompt:
+    'Polish the pinned selection, or the whole document when there is no selected text, to make the writing clearer and more fluent.',
   conversation: 'Conversation',
   newConversation: 'New conversation',
   target: 'Edit target',

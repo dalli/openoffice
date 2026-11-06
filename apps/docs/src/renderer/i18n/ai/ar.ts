@@ -34,6 +34,8 @@ export const ar = {
   aiChipChartData: 'تحديث بيانات المخطط',
   aiChipChartTitle: 'تغيير عنوان المخطط',
   aiChipTableEdit: 'ضبط الصفوف والأعمدة',
+  aiQueueTransferFailed:
+    'تعذر نقل طلبات التحرير. لم تتغير قائمة الانتظار. راجع المستند ثم أرسل مجددًا.',
   aiQueueTitle: 'تعديلات في الانتظار',
   aiQueueHint: 'انقر على صف لتحديد موضعه في النص؛ عند الإرسال تُطبق جميع التعديلات في طلب واحد',
   aiQueueSend: 'إرسال {count} تعديلات',

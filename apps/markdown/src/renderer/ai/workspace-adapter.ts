@@ -180,7 +180,33 @@ export function createMarkdownWorkspaceAdapter(
   }
 
   return createWorkspaceDocumentAdapter({
-    rollback: deps.rollback,
+    rollback: deps.rollback && {
+      async capture(state, signal) {
+        const doc = liveEditor().state.doc
+        const ranges = [...selections.values()]
+          .filter((selection) => selection.valid && selection.revision === state.revision)
+          .map((selection) => ({ ...selection }))
+        return {
+          document: await deps.rollback!.capture(state, signal),
+          doc,
+          selections: ranges,
+        }
+      },
+      async restore(snapshot, state, signal) {
+        const saved = snapshot as { document: unknown; doc: PmNode; selections: FrozenSelection[] }
+        await deps.rollback!.restore(saved.document, state, signal)
+        const live = liveEditor()
+        for (const selection of saved.selections) {
+          if (selection.instanceId === instanceId() && saved.doc.eq(live.state.doc))
+            selections.set(selection.id, {
+              ...selection,
+              revision: String(revision),
+              selection: selection.selection.getBookmark().resolve(live.state.doc),
+            })
+        }
+        while (selections.size > SNAPSHOT_LIMIT) selections.delete(selections.keys().next().value!)
+      },
+    },
     subscribeChanges(handler) {
       changes.add(handler)
       const off = deps.subscribeChanges?.(handler)
@@ -190,6 +216,17 @@ export function createMarkdownWorkspaceAdapter(
       }
     },
     getState: state,
+    refreshSelection(captured, current) {
+      const frozen = captured.selectionId ? selections.get(captured.selectionId) : undefined
+      if (
+        !frozen ||
+        !frozen.valid ||
+        frozen.instanceId !== current.instanceId ||
+        frozen.revision !== current.revision
+      )
+        reject('stale-selection')
+      return frozen.id
+    },
     masking: 'applied',
     toolAccess: TOOL_ACCESS,
     beforeFirstWrite: deps.beforeFirstWrite,

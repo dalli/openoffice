@@ -147,6 +147,8 @@ export interface ProjectIpcDeps {
 }
 
 export interface ProjectIpcController {
+  /** A main-owned service wrote part of a project through the same guide. */
+  changed(projectId: ProjectId, part: ProjectChangedPart): void
   /** a window's bridge started or stopped listening to one event */
   listen(sender: number, method: unknown, listening: unknown): void
   /** a window closed: forget everything about it */
@@ -727,6 +729,7 @@ export function registerProjectFolderIpc(deps: ProjectIpcDeps): ProjectIpcContro
   }
 
   return {
+    changed: announce,
     listen(sender, method, on) {
       if (!EVENT_METHODS.includes(method as ProjectFolderEventMethod)) return
       const event = method as ProjectFolderEventMethod

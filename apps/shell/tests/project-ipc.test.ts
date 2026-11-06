@@ -912,6 +912,23 @@ describe('waitForPageReturn', () => {
 })
 
 describe('"the app wrote part of a project" (onProjectChanged)', () => {
+  it('forwards changes from main-owned workspace services through the same event', () => {
+    t.controller.listen(HOME, 'onProjectChanged', true)
+    t.controller.listen(DOCS, 'onProjectChanged', true)
+    t.controller.changed('p1', 'memory')
+    expect(t.sent.filter((s) => s.channel === PROJECT_FOLDER_EVENTS.onProjectChanged)).toEqual([
+      {
+        target: HOME,
+        channel: PROJECT_FOLDER_EVENTS.onProjectChanged,
+        payload: { projectId: 'p1', part: 'memory' },
+      },
+      {
+        target: DOCS,
+        channel: PROJECT_FOLDER_EVENTS.onProjectChanged,
+        payload: { projectId: 'p1', part: 'memory' },
+      },
+    ])
+  })
   const changesTo = (target: number) =>
     t.sent
       .filter((s) => s.target === target && s.channel === PROJECT_FOLDER_EVENTS.onProjectChanged)

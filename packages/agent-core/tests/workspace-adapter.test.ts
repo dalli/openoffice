@@ -71,6 +71,78 @@ function fixture(overrides: Partial<WorkspaceDocumentAdapterDeps> = {}) {
 }
 
 describe('workspace document execution boundary', () => {
+  it('exports templates outside prepared work and revalidates after an asynchronous export', async () => {
+    const pending = deferred<void>()
+    const snapshot = {
+      fileName: 'draft.docx',
+      title: 'draft',
+      bytes: new Uint8Array([1, 2]),
+      redacted: false,
+    }
+    const template = vi.fn(async () => {
+      await pending.promise
+      return snapshot
+    })
+    const f = fixture({ template })
+    const state = await f.adapter.capture()
+    const read = f.adapter.template!(state, 'preview')
+    await vi.waitFor(() => expect(template).toHaveBeenCalledOnce())
+    await expect(f.prepare()).rejects.toMatchObject({ kind: 'busy' })
+    f.change({ revision: '2' })
+    pending.resolve()
+    await expect(read).rejects.toMatchObject({ kind: 'stale-document' })
+    const prepared = await f.prepare()
+    await expect(f.adapter.template!(prepared.state, 'info')).rejects.toMatchObject({
+      kind: 'busy',
+    })
+    prepared.release()
+    expect(await f.adapter.template!(await f.adapter.capture(), 'preview')).toEqual(snapshot)
+    f.adapter.dispose()
+  })
+
+  it('rejects redacted as-is exports and discards cancelled template reads', async () => {
+    const abort = new AbortController()
+    const f = fixture({
+      template: async () => ({
+        fileName: 'draft.docx',
+        title: 'draft',
+        redacted: true,
+        bytes: null,
+      }),
+    })
+    const state = await f.adapter.capture()
+    await expect(f.adapter.template!(state, 'as-is')).rejects.toMatchObject({
+      kind: 'unsafe-content',
+    })
+    expect(await f.adapter.template!(state, 'info')).toMatchObject({ redacted: true, bytes: null })
+    abort.abort()
+    await expect(f.adapter.template!(state, 'preview', abort.signal)).rejects.toMatchObject({
+      kind: 'cancelled',
+    })
+    f.adapter.dispose()
+  })
+  it('refreshes metadata without adopting a later caret or reading content', async () => {
+    const f = fixture()
+    const pinned = await f.adapter.capture()
+    f.change({ selectionId: 'later-caret' })
+    expect(await f.adapter.refresh(pinned)).toEqual(pinned)
+    f.change({ revision: '2' })
+    await expect(f.adapter.refresh(pinned)).rejects.toMatchObject({ kind: 'stale-selection' })
+    const whole = { ...pinned, selectionId: null }
+    expect(await f.adapter.refresh(whole)).toMatchObject({ revision: '2', selectionId: null })
+    f.change({ instanceId: 'replacement' })
+    await expect(f.adapter.refresh(whole)).rejects.toMatchObject({ kind: 'stale-document' })
+    expect(f.read).not.toHaveBeenCalled()
+    expect(f.executeTool).not.toHaveBeenCalled()
+  })
+
+  it('rejects a refresh hook that substitutes another selection', async () => {
+    const f = fixture({ refreshSelection: () => 'another-selection' })
+    await expect(f.adapter.refresh(await f.adapter.capture())).rejects.toMatchObject({
+      kind: 'stale-selection',
+    })
+  })
+
   it('copies captured state, tool schemas and inputs across asynchronous work', async () => {
     const gate = deferred<void>()
     const beforeFirstWrite = vi.fn(() => gate.promise)

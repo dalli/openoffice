@@ -273,3 +273,24 @@ describe('the @ list files of a project (spec 5.13)', () => {
     ])
   })
 })
+
+describe('workspace project placement', () => {
+  it('uses the conversation project and target folder independently of the shell selection', async () => {
+    const placer = makePlacer()
+    const placement = placer.placementInProject(projectId, join(root, 'drafts', 'source.docx'))!
+    expect(placement).toEqual({ projectId, root, dir: join(root, 'drafts') })
+    expect(placer.placementInProject(null, null)).toBeNull()
+    expect(placer.placementInProject('missing-project', null)).toBeNull()
+    placer.preset(NEW_TAB, Promise.resolve(placement))
+    chosen.set(NEW_TAB, projectId)
+    const bytes = new Uint8Array([1, 2, 3])
+    expect(await placer.writeFor(NEW_TAB, 'copy.docx', bytes, 'other-project')).toBeNull()
+    expect(readdirSync(join(root, 'drafts'))).toEqual([])
+    const saved = await placer.writeFor(NEW_TAB, 'copy.docx', bytes, projectId)
+    expect(saved).toBe(join(root, 'drafts', 'copy.docx'))
+    expect(readFileSync(saved!)).toEqual(Buffer.from(bytes))
+    chosen.set(NEW_TAB, null)
+    expect(await placer.writeFor(NEW_TAB, 'copy-again.docx', bytes, projectId)).toBeNull()
+    expect(readdirSync(join(root, 'drafts'))).toEqual(['copy.docx'])
+  })
+})

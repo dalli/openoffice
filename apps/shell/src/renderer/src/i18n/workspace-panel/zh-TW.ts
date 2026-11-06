@@ -1,6 +1,10 @@
 import type { zh } from './zh'
 
 export const zhTW = {
+  sendScope:
+    '傳送請求時，編輯目標的內容以及您選擇的參考範圍、附件、技能和專案脈絡將傳送給所選 AI。',
+  attachmentLimit: '每則訊息最多可附加 20 個檔案。',
+  polishPrompt: '請潤飾已固定的選取範圍；若未選取文字，則潤飾整份文件，讓表達更清楚流暢。',
   conversation: '對話',
   newConversation: '新增對話',
   target: '修改對象',

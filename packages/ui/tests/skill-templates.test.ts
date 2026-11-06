@@ -13,6 +13,8 @@ import { useSkillTemplates, type SkillTemplates } from '../src/use-skill-templat
 import { useSkillProposals, type SkillProposals } from '../src/use-skill-proposals'
 import type { SkillUse } from '../src/use-composer-skills'
 import type { SkillCardBridge } from '../src/skill-card-model'
+import { initialSkillCardDraft } from '../src/skill-card-model'
+import { OriginalTemplateActions } from '../src/SkillTemplateActions'
 import type { SkillChipView } from '../src/skill-picker-model'
 import type {
   HandedPreview,
@@ -436,10 +438,54 @@ const DOC = (over: Partial<TemplateDocument> = {}): TemplateDocument => ({
 })
 
 describe('the card’s template buttons in the original tab (spec 5.6)', () => {
+  it('waits for the run to finish before reading metadata and hands a late preview result back to its owner', async () => {
+    let opened!: (result: unknown) => void
+    const { bridge } = templateBridge({
+      openPreview: vi.fn(
+        () =>
+          new Promise((resolve) => {
+            opened = resolve
+          }),
+      ),
+    })
+    const document = DOC({ redacted: vi.fn(() => false) })
+    const onPreviewOpened = vi.fn()
+    const render = (busy: boolean) =>
+      act(() =>
+        root.render(
+          createElement(OriginalTemplateActions, {
+            context: {
+              lang: 'ko',
+              proposal: PROPOSAL,
+              draft: initialSkillCardDraft(PROPOSAL),
+              blocked: null,
+              busy,
+              save: vi.fn(),
+            },
+            document,
+            bridge,
+            onPreviewOpened,
+          }),
+        ),
+      )
+    render(true)
+    await flush()
+    expect(document.redacted).not.toHaveBeenCalled()
+    render(false)
+    await flush()
+    expect(document.redacted).toHaveBeenCalledOnce()
+    act(() => button('비운 양식 만들기')!.click())
+    await flush()
+    expect(bridge.openPreview).toHaveBeenCalledOnce()
+    act(() => root.render(createElement('div')))
+    await act(async () => opened({ ok: true, tabId: 'copy', previewId: 'preview' }))
+    expect(onPreviewOpened).toHaveBeenCalledWith({ tabId: 'copy', previewId: 'preview' })
+  })
   it('saves the document as edited, as it is', async () => {
     const { bridge } = templateBridge()
     const cards = cardBridge()
-    const panel = renderPanel({ editor: 'docs', bridge, cards, document: DOC() })
+    const document = DOC()
+    const panel = renderPanel({ editor: 'docs', bridge, cards, document })
     act(() => panel.current().cards.add(PROPOSAL))
     await settle()
     await act(async () => button('원래 문서 그대로 저장')!.click())
@@ -450,6 +496,7 @@ describe('the card’s template buttons in the original tab (spec 5.6)', () => {
       }),
     )
     expect(text()).toContain('저장했습니다')
+    expect(document.bytes).toHaveBeenCalledWith({ allowRedacted: false })
   })
 
   it('blocks "save as is" with the reason when the document has redaction marks', async () => {

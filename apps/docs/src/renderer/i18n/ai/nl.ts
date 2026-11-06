@@ -36,6 +36,8 @@ export const nl = {
   aiChipChartData: 'Grafiekgegevens bijwerken',
   aiChipChartTitle: 'Grafiektitel wijzigen',
   aiChipTableEdit: 'Rijen/kolommen aanpassen',
+  aiQueueTransferFailed:
+    'De bewerkingen konden niet worden overgedragen. De wachtrij is ongewijzigd. Controleer het document en verstuur opnieuw.',
   aiQueueTitle: 'Wijzigingen in wachtrij',
   aiQueueHint:
     'Klik op een rij om de passage te vinden; verzenden past alle wijzigingen toe in één verzoek',

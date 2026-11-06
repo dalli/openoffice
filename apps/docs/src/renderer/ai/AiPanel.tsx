@@ -84,6 +84,11 @@ import type { AiPageSetupAccess } from './page-setup'
 import type { AiNotesAccess } from './note-ops'
 import { createDocsSkill } from './docs-skill'
 import { createDocsWorkspaceAdapter } from './workspace-adapter'
+import { handoffDocsEditBatch } from './workspace-edit-batch'
+import { createDocsEditQueueControls } from './workspace-edit-queue'
+import type { WorkspaceDocumentAdapter } from '@genoffice/agent-core'
+import type { DocsLayoutStore } from '../layout-store'
+import type { DocsReviewStore } from '../review-store'
 import { hostWorkspaceEditor } from '@genoffice/agent-core/workspace-editor-host'
 import { MindMapCard } from './MindMapCard'
 import { insertPictureAtSelection } from '../editor/insert-picture'
@@ -508,11 +513,17 @@ interface AiPanelProps {
   docExtras?: AiDocExtras
   /** footnote / endnote lists for insert_footnote, insert_endnote, delete_note, read_notes */
   notesAccess?: AiNotesAccess
+  /** App-owned review lists, observed and restored together with workspace body edits. */
+  layoutStore?: DocsLayoutStore
+  workspacePageSetupAccess?: AiPageSetupAccess
+  getLayoutBaseline?(): unknown
+  reviewStore?: DocsReviewStore
   /**
    * The run a skill template's copy handed to this tab ended well: the app
    * saves the untitled copy into the panel's project (spec 6)
    */
   onHandedRunDone?: () => void
+  onWorkspaceHandedRunDone?: (projectId: string, validate: () => Promise<void>) => Promise<boolean>
 }
 
 const MODEL_BRIDGE: AiModelPickerBridge = {
@@ -545,14 +556,21 @@ export function AiPanel({
   pageSetupAccess,
   docExtras,
   notesAccess,
+  reviewStore,
+  layoutStore,
+  workspacePageSetupAccess,
+  getLayoutBaseline,
   templateDocument,
   onHandedRunDone,
+  onWorkspaceHandedRunDone,
 }: AiPanelProps) {
   const { t, lang } = useI18n()
   /** the run a template copy handed to this tab, until it ends (spec 6) */
   const handedRunRef = useRef(createHandedRun())
   const onHandedRunDoneRef = useRef(onHandedRunDone)
   onHandedRunDoneRef.current = onHandedRunDone
+  const onWorkspaceHandedRunDoneRef = useRef(onWorkspaceHandedRunDone)
+  onWorkspaceHandedRunDoneRef.current = onWorkspaceHandedRunDone
   // Panel chrome follows the UI language; message text follows its own content (dir=auto below)
   const isRtl = lang === 'ar' || lang === 'he'
   const [input, setInput] = useState('')
@@ -854,6 +872,8 @@ export function AiPanel({
   commentsAccessRef.current = commentsAccess
   const hfAccessRef = useRef(hfAccess)
   hfAccessRef.current = hfAccess
+  const workspaceLayoutRef = useRef({ workspacePageSetupAccess, getLayoutBaseline })
+  workspaceLayoutRef.current = { workspacePageSetupAccess, getLayoutBaseline }
   const pageSetupAccessRef = useRef(pageSetupAccess)
   pageSetupAccessRef.current = pageSetupAccess
   const docExtrasRef = useRef(docExtras)
@@ -1114,6 +1134,8 @@ export function AiPanel({
           error: `${outcome.reason}${outcome.error ? `: ${outcome.error}` : ''}; the user discarded the partial content`,
         }
   }
+  const workspaceTemplateRef = useRef(templateDocument)
+  workspaceTemplateRef.current = templateDocument
   const runDocWriterRef = useRef(runDocWriter)
   runDocWriterRef.current = runDocWriter
 
@@ -1131,25 +1153,67 @@ export function AiPanel({
   const loopRef = useRef<AgentLoop<ProseMirrorNode> | null>(null)
   // This panel remounts on document replacement, but not on Save As.
   const workspaceDocumentId = useRef(crypto.randomUUID())
+  const workspaceAdapterRef = useRef<WorkspaceDocumentAdapter | null>(null)
+  const queueHandoffRef = useRef(false)
+  const [queueHandoffBusy, setQueueHandoffBusy] = useState(false)
+  const [queueHandoffFailed, setQueueHandoffFailed] = useState(false)
+  const queueControlsRef = useRef<ReturnType<typeof createDocsEditQueueControls> | null>(null)
+  const queueActionsRef = useRef<{
+    update(id: string, instruction: string): void
+    remove(id: string): void
+    clear(): void
+    focus(id: string): void
+    send(): Promise<boolean>
+  } | null>(null)
+  const editQueueRef = useRef(editQueue)
+  editQueueRef.current = editQueue
   useEffect(() => {
     const port = window.aiOfficeWorkspaceEditor
     if (!port) return
-    return hostWorkspaceEditor(
-      port,
-      createDocsWorkspaceAdapter({
-        getEditor: () => editorRef.current,
-        getDocumentId: () => workspaceDocumentId.current,
-        getNumIds: () => ({
-          bullet:
-            findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,
-          ordered:
-            findNumId(blocksRef.current, 'ordered') ?? numIdFallbackRef.current?.ordered ?? null,
-        }),
-        getTrack: () => (trackChangesRef.current ? { author: AI_REVISION_AUTHOR } : undefined),
+    const adapter = createDocsWorkspaceAdapter({
+      getEditor: () => editorRef.current,
+      getDocumentId: () => workspaceDocumentId.current,
+      getNumIds: () => ({
+        bullet: findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,
+        ordered:
+          findNumId(blocksRef.current, 'ordered') ?? numIdFallbackRef.current?.ordered ?? null,
       }),
-      () => loopRef.current?.busy === true,
-    )
-  }, [])
+      getTrack: () => (trackChangesRef.current ? { author: AI_REVISION_AUTHOR } : undefined),
+      reviewStore,
+      layoutStore,
+      getLayoutBaseline: () => workspaceLayoutRef.current.getLayoutBaseline?.(),
+      getHf: () => hfAccessRef.current,
+      getPageSetup: () => workspaceLayoutRef.current.workspacePageSetupAccess,
+      getExtras: () => docExtrasRef.current,
+      getComments: () => commentsAccessRef.current,
+      getNotes: () => notesAccessRef.current,
+      getTemplateDocument: () => workspaceTemplateRef.current ?? null,
+    })
+    workspaceAdapterRef.current = adapter
+    const controls = createDocsEditQueueControls({
+      editor: () => editorRef.current,
+      items: () => editQueueRef.current,
+      update: (id, instruction) => queueActionsRef.current!.update(id, instruction),
+      remove: (id) => queueActionsRef.current!.remove(id),
+      clear: () => queueActionsRef.current!.clear(),
+      focus: (id) => queueActionsRef.current!.focus(id),
+      send: () => queueActionsRef.current!.send(),
+    })
+    queueControlsRef.current = controls
+    const off = hostWorkspaceEditor(port, adapter, () => loopRef.current?.busy === true, {
+      ...controls,
+      saveProjectCopy: (projectId, validate) =>
+        onWorkspaceHandedRunDoneRef.current?.(projectId, validate) ?? Promise.resolve(false),
+    })
+    return () => {
+      if (workspaceAdapterRef.current === adapter) workspaceAdapterRef.current = null
+      if (queueControlsRef.current === controls) queueControlsRef.current = null
+      off()
+    }
+  }, [reviewStore, layoutStore])
+  useEffect(() => {
+    queueControlsRef.current?.changed()
+  }, [editQueue])
   if (!loopRef.current) {
     const numIds = (): NumIds => ({
       bullet: findNumId(blocksRef.current, 'bullet') ?? numIdFallbackRef.current?.bullet ?? null,
@@ -1486,7 +1550,8 @@ export function AiPanel({
     skillUse: SkillUse = NO_SKILL_USE,
   ) => {
     const loop = loopRef.current
-    if (!instruction || !loop || loop.busy || pendingSendRef.current) return
+    if (!instruction || !loop || loop.busy || pendingSendRef.current || queueHandoffRef.current)
+      return
     // Nothing can run yet: the composer shows the connect prompt or the notice about what
     // leaves the PC instead of an error, and keeps its text. A request made in front of the
     // notice (or while the status check is still running) is held and starts once the way is
@@ -1597,10 +1662,11 @@ export function AiPanel({
   }
 
   /** submit every still-anchored queued edit as one batch run */
-  const sendQueue = () => {
+  const sendQueueLocally = () => {
     const loop = loopRef.current
-    if (!loop || loop.busy || editQueue.length === 0) return
-    const entries = liveItems(resolveQueue(editorRef.current, editQueue))
+    const items = editQueueRef.current
+    if (!loop || loop.busy || items.length === 0) return
+    const entries = liveItems(resolveQueue(editorRef.current, items))
     if (entries.length === 0) {
       onQueueClear?.()
       return
@@ -1611,8 +1677,75 @@ export function AiPanel({
     const display = buildQueueSummary(t('aiQueueSubmitted', { count: entries.length }), entries)
     // consumed at send: the run rewrites the anchored passages, which would
     // orphan the anchors anyway; a failed run is retried via the retry action
-    onQueueConsume?.(editQueue.map((item) => item.qid))
+    onQueueConsume?.(items.map((item) => item.qid))
     runWith(instruction, display)
+  }
+
+  const sendQueue = async (shared = false): Promise<boolean> => {
+    if (
+      loopRef.current?.busy ||
+      pendingSendRef.current ||
+      queueHandoffRef.current ||
+      !editQueueRef.current.length
+    )
+      return false
+    const adapter = workspaceAdapterRef.current
+    if (!adapter) {
+      if (!shared) sendQueueLocally()
+      return false
+    }
+    const generation = currentDocGeneration()
+    const current = () =>
+      workspaceAdapterRef.current === adapter && currentDocGeneration() === generation
+    queueHandoffRef.current = true
+    setQueueHandoffBusy(true)
+    setQueueHandoffFailed(false)
+    let transferred = false
+    try {
+      const handled = await handoffDocsEditBatch({
+        request: window.desktop.workspaceAiEntry,
+        capture: () => adapter.capture(),
+        editor: () => editorRef.current,
+        items: () => editQueueRef.current,
+        current,
+        header: (count) => t('aiQueueSubmitted', { count }),
+        consume: (ids) => {
+          transferred = true
+          onQueueConsume?.(ids)
+          if (editQueueRef.current.every((item) => ids.includes(item.qid))) onCollapse?.()
+        },
+        rejected: () => setQueueHandoffFailed(true),
+      })
+      if (!handled && current() && !shared) {
+        queueHandoffRef.current = false
+        sendQueueLocally()
+      }
+      return transferred
+    } finally {
+      queueHandoffRef.current = false
+      if (current()) setQueueHandoffBusy(false)
+    }
+  }
+
+  queueActionsRef.current = {
+    update(id, instruction) {
+      editQueueRef.current = editQueueRef.current.map((item) =>
+        item.qid === id ? { ...item, instruction } : item,
+      )
+      onQueueEditInstruction?.(id, instruction)
+    },
+    remove(id) {
+      editQueueRef.current = editQueueRef.current.filter((item) => item.qid !== id)
+      onQueueRemove?.(id)
+    },
+    clear() {
+      editQueueRef.current = []
+      onQueueClear?.()
+    },
+    focus(id) {
+      onQueueFocus?.(id)
+    },
+    send: () => sendQueue(true),
   }
 
   const retry = () =>
@@ -2201,14 +2334,21 @@ export function AiPanel({
             </div>
           </div>
         )}
+        {queueHandoffFailed && editQueue.length > 0 && (
+          <div className="ai-queue-hint" role="alert">
+            {t('aiQueueTransferFailed')}
+          </div>
+        )}
         <EditQueueCard
           items={editQueue}
           editor={editor}
-          busy={busy}
+          busy={busy || queueHandoffBusy}
           onEditInstruction={(qid, text) => onQueueEditInstruction?.(qid, text)}
           onRemove={(qid) => onQueueRemove?.(qid)}
           onDiscardAll={() => onQueueClear?.()}
-          onSend={sendQueue}
+          onSend={() => {
+            void sendQueue()
+          }}
           onFocus={(qid) => onQueueFocus?.(qid)}
         />
         {/* Above the input card, not inside its footer: the reset time is long and
@@ -2334,6 +2474,7 @@ export function AiPanel({
           }
           value={input}
           busy={busy}
+          sendDisabled={queueHandoffBusy}
           placeholder={t('aiInputPlaceholder')}
           hintIdle={t('aiHintIdle')}
           hintBusy={t('aiHintBusy')}

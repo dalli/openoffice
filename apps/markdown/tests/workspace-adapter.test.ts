@@ -109,6 +109,32 @@ async function prepare(adapter: WorkspaceDocumentAdapter, mode: 'edit' | 'refere
 }
 
 describe('Markdown workspace snapshots', () => {
+  it('refreshes the pinned range through a rewrite and rollback without following the visible caret', async () => {
+    const f = fixture()
+    select(f.editor, 'old text')
+    const pinned = await f.adapter.capture()
+    const first = await f.adapter.prepare({ runId: 'first', mode: 'edit', state: pinned })
+    select(f.editor, 'beta')
+    await first.execute(
+      ops({ op: 'replaceText', target: 'selection', find: 'old text', replace: 'new words' }),
+    )
+    first.release()
+    const refreshed = await f.adapter.refresh(pinned)
+    expect((await f.adapter.read(refreshed, { scope: 'selection' })).text).toContain('new words')
+    await f.adapter.rollback!(first.rollbackId!, first.state)
+    const restored = await f.adapter.refresh(refreshed)
+    expect((await f.adapter.read(restored, { scope: 'selection' })).text).toContain('old text')
+    const second = await f.adapter.prepare({ runId: 'second', mode: 'edit', state: restored })
+    await second.execute(
+      ops({ op: 'replaceText', target: 'selection', find: 'old text', replace: 'continued' }),
+    )
+    second.release()
+    expect(f.editor.state.doc.textContent).toContain('alpha continued')
+    expect(f.editor.state.doc.textContent).toContain('beta untouched')
+    f.editor.view.dispatch(f.editor.state.tr.insertText('manual ', 1))
+    await expect(f.adapter.refresh(restored)).rejects.toMatchObject({ kind: 'stale-selection' })
+  })
+
   it('restores the body and frontmatter together through the editor-owned token', async () => {
     const f = fixture(editorOf(), 'title: Original')
     const before = f.editor.getJSON()

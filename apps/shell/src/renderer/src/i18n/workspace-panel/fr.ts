@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const fr = {
+  sendScope:
+    'L’envoi transmet à l’IA sélectionnée le contenu du document à modifier ainsi que les passages de référence, pièces jointes, compétences et contexte du projet choisis.',
+  attachmentLimit: 'Vous pouvez joindre jusqu’à 20 fichiers par message.',
+  polishPrompt:
+    'Améliorez la sélection figée, ou tout le document si aucun texte n’est sélectionné, pour rendre le style plus clair et fluide.',
   conversation: 'Conversation',
   newConversation: 'Nouvelle conversation',
   target: 'Document à modifier',

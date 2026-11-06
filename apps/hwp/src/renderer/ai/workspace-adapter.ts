@@ -113,6 +113,13 @@ export function createHwpWorkspaceAdapter(deps: HwpWorkspaceAdapterDeps): Worksp
   let lastSelectionKey = ''
   let lastSelectionId: string | null = null
   let undoBaseline = 0
+  const rollbacks = new Set<string>()
+  let disposed = false
+
+  const releaseRollback = (id: string): void => {
+    rollbacks.delete(id)
+    void deps.bridge.workspaceReleaseRollback(id).catch(() => {})
+  }
 
   const readNative = async (signal?: AbortSignal): Promise<AgentWorkspaceState> => {
     abort(signal)
@@ -191,8 +198,19 @@ export function createHwpWorkspaceAdapter(deps: HwpWorkspaceAdapterDeps): Worksp
         instanceId: native.instance,
         revision: native.revision,
         selectionId: lastSelectionId,
-        readOnly: deps.readOnly?.() === true,
+        readOnly: native.readOnly === true || deps.readOnly?.() === true,
       }
+    },
+    async refreshSelection(state, current, signal) {
+      const captured = state.selectionId ? selections.get(state.selectionId) : undefined
+      if (
+        !captured ||
+        captured.instanceId !== current.instanceId ||
+        captured.revision !== current.revision
+      )
+        throw new WorkspaceAdapterError('stale-selection')
+      await invoke(versionOf(current), 'readSelectionSnapshot', [captured.scope.segments], signal)
+      return state.selectionId!
     },
     async read(state, request, signal) {
       const selection = selectionFor(state)
@@ -290,7 +308,53 @@ export function createHwpWorkspaceAdapter(deps: HwpWorkspaceAdapterDeps): Worksp
       abort(signal)
       deps.onUndoBaseline?.(undoBaseline)
     },
+    rollback: {
+      async capture(state, signal) {
+        abort(signal)
+        const reply = await deps.bridge.workspaceCaptureRollback(versionOf(state))
+        if (!reply.ok) {
+          throw new WorkspaceAdapterError(
+            reply.reason === 'changed' ? 'stale-document' : 'not-ready',
+          )
+        }
+        if (disposed || signal?.aborted) {
+          releaseRollback(reply.id)
+          throw new WorkspaceAdapterError(disposed ? 'released' : 'cancelled')
+        }
+        rollbacks.add(reply.id)
+        while (rollbacks.size > 16) releaseRollback(rollbacks.values().next().value!)
+        return {
+          id: reply.id,
+          selections: [...selections]
+            .filter(([, selection]) => selection.revision === state.revision)
+            .map(([id, selection]) => [id, structuredClone(selection)]),
+        }
+      },
+      async restore(snapshot, state, signal) {
+        abort(signal)
+        if (deps.readOnly?.() === true) throw new WorkspaceAdapterError('read-only')
+        const saved = snapshot as { id: string; selections: Array<[string, CapturedSelection]> }
+        if (!saved || typeof saved.id !== 'string' || !rollbacks.has(saved.id)) {
+          throw new WorkspaceAdapterError('released')
+        }
+        const reply = await deps.bridge.workspaceRollback(versionOf(state), saved.id)
+        rollbacks.delete(saved.id)
+        if (!reply.ok) {
+          throw new WorkspaceAdapterError(
+            reply.reason === 'changed' ? 'stale-document' : 'released',
+          )
+        }
+        if (reply.instance !== state.instanceId) throw new WorkspaceAdapterError('stale-document')
+        for (const [id, selection] of saved.selections) {
+          if (selection.instanceId === reply.instance)
+            selections.set(id, { ...selection, revision: reply.revision })
+        }
+        while (selections.size > 64) selections.delete(selections.keys().next().value!)
+      },
+    },
     dispose() {
+      disposed = true
+      for (const id of rollbacks) releaseRollback(id)
       selections.clear()
       lastSelectionKey = ''
       lastSelectionId = null

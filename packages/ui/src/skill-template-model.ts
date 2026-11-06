@@ -34,7 +34,7 @@ export interface TemplateDocument {
   /** the title the tab shows */
   title: string
   /** the document as edited now (not the file on disk); null when it cannot be read */
-  bytes: () => Promise<Uint8Array | null>
+  bytes: (options?: { allowRedacted?: boolean }) => Promise<Uint8Array | null>
   /**
    * The document has redaction marks the editor recognizes (docs/security.md).
    * Editors that recognize none answer false.

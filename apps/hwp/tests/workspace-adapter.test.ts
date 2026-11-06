@@ -39,6 +39,7 @@ function setup(options: { memo?: boolean; selected?: boolean } = {}) {
   const onChange = vi.fn()
   const undoBaseline = vi.fn()
   let beforeInvoke: ((method: string) => Promise<void>) | null = null
+  const checkpoints = new Map<string, string>()
   const invoke = vi.fn(async (expected: AgentWorkspaceVersion, method: string, args: unknown[]) => {
     await beforeInvoke?.(method)
     if (expected.instance !== instance || expected.revision !== String(revision)) {
@@ -120,9 +121,29 @@ function setup(options: { memo?: boolean; selected?: boolean } = {}) {
       text,
       foreignChanges: foreign,
       masking: 'unsupported',
+      readOnly,
       selection: structuredClone(selection),
     })),
     workspaceInvoke: invoke,
+    workspaceCaptureRollback: vi.fn(async (expected: AgentWorkspaceVersion) => {
+      await beforeInvoke?.('captureRollback')
+      if (expected.instance !== instance || expected.revision !== String(revision))
+        return { ok: false, reason: 'changed' }
+      const id = `checkpoint-${checkpoints.size}`
+      checkpoints.set(id, text)
+      return { ok: true, id }
+    }),
+    workspaceReleaseRollback: vi.fn(async (id: string) => checkpoints.delete(id)),
+    workspaceRollback: vi.fn(async (expected: AgentWorkspaceVersion, id: string) => {
+      await beforeInvoke?.('rollback')
+      if (expected.instance !== instance || expected.revision !== String(revision))
+        return { ok: false, reason: 'changed' }
+      if (readOnly || !checkpoints.has(id)) return { ok: false, reason: 'unavailable' }
+      text = checkpoints.get(id)!
+      checkpoints.delete(id)
+      revision++
+      return { ok: true, instance, revision: String(revision) }
+    }),
   } as unknown as AgentBridge
   const adapter = createHwpWorkspaceAdapter({
     bridge,
@@ -173,6 +194,36 @@ const replace = (id = 'call-1'): AgentToolCall => ({
 })
 
 describe('HWP workspace document adapter', () => {
+  it('continues the original selection after editing and rollback, while rejecting unrelated revisions', async () => {
+    const f = setup({ selected: true })
+    const pinned = await f.adapter.capture()
+    const first = await f.adapter.prepare({ runId: 'first', mode: 'edit', state: pinned })
+    f.loseSelection()
+    await first.execute({
+      id: 'rewrite',
+      name: 'replace_selection',
+      input: { paragraphs: ['replacement'] },
+    })
+    first.release()
+    const refreshed = await f.adapter.refresh(pinned)
+    expect(refreshed.selectionId).toBe(pinned.selectionId)
+    expect((await f.adapter.read(refreshed, { scope: 'selection' })).text).toBe('replacement')
+    await f.adapter.rollback!(first.rollbackId!, first.state)
+    const restored = await f.adapter.refresh(refreshed)
+    expect((await f.adapter.read(restored, { scope: 'selection' })).text).toBe('source')
+    const second = await f.adapter.prepare({ runId: 'second', mode: 'edit', state: restored })
+    await second.execute({
+      id: 'again',
+      name: 'replace_selection',
+      input: { paragraphs: ['continued'] },
+    })
+    second.release()
+    expect(f.text()).toBe('unsaved continued material')
+    f.userEdit()
+    await expect(f.adapter.refresh(restored)).rejects.toMatchObject({ kind: 'stale-selection' })
+    f.adapter.dispose()
+  })
+
   it('reads current unsaved content with explicit unsupported masking and truncation metadata', async () => {
     const { adapter } = setup()
     const state = await adapter.capture()
@@ -261,6 +312,97 @@ describe('HWP workspace document adapter', () => {
     expect(result.mutated).toBe(true)
     expect(text()).toBe('unsaved replacement material')
     expect((await adapter.read(after, { scope: 'selection' })).text).toBe('replacement')
+  })
+
+  it('restores a multi-tool run using one private checkpoint and consumes the rollback token', async () => {
+    const f = setup()
+    const session = await f.adapter.prepare({
+      runId: 'p',
+      mode: 'edit',
+      state: await f.adapter.capture(),
+    })
+    await session.execute(replace())
+    const id = session.rollbackId!
+    await session.execute({
+      id: 'second',
+      name: 'replace_text',
+      input: { find: 'updated', replace: 'finished' },
+    })
+    expect(session.rollbackId).toBe(id)
+    expect(f.bridge.workspaceCaptureRollback).toHaveBeenCalledOnce()
+    const last = session.state
+    session.release()
+    await f.adapter.rollback!(id, last)
+    expect(f.text()).toBe('unsaved source material')
+    await expect(f.adapter.rollback!(id, last)).rejects.toMatchObject({ kind: 'released' })
+  })
+
+  it.each(['edit', 'swap', 'read-only', 'late-edit', 'late-read-only'] as const)(
+    'refuses rollback after %s, including changes while the bridge is queued',
+    async (action) => {
+      const f = setup()
+      const session = await f.adapter.prepare({
+        runId: 'p',
+        mode: 'edit',
+        state: await f.adapter.capture(),
+      })
+      await session.execute(replace())
+      const last = session.state
+      session.release()
+      const change = () => {
+        if (action.includes('read-only')) f.setReadOnly()
+        else if (action === 'swap') f.replaceInstance()
+        else f.userEdit()
+      }
+      if (action.startsWith('late-'))
+        f.delayInvoke(async (method) => {
+          if (method === 'rollback') change()
+        })
+      else change()
+      await expect(f.adapter.rollback!(session.rollbackId!, last)).rejects.toMatchObject({
+        kind: expect.any(String),
+      })
+      expect(f.text()).toContain('updated')
+      expect(f.text()).not.toContain('source')
+    },
+  )
+
+  it('releases a checkpoint that arrives after cancellation without writing', async () => {
+    const f = setup()
+    const session = await f.adapter.prepare({
+      runId: 'p',
+      mode: 'edit',
+      state: await f.adapter.capture(),
+    })
+    const gate = deferred<void>()
+    const entered = deferred<void>()
+    f.delayInvoke(async (method) => {
+      if (method === 'captureRollback') {
+        entered.resolve()
+        await gate.promise
+      }
+    })
+    const controller = new AbortController()
+    const writing = session.execute(replace(), controller.signal)
+    await entered.promise
+    controller.abort()
+    gate.resolve()
+    await expect(writing).rejects.toMatchObject({ kind: 'cancelled' })
+    expect(f.bridge.workspaceReleaseRollback).toHaveBeenCalledOnce()
+    expect(f.writes()).toBe(0)
+  })
+
+  it('releases private history checkpoints when the renderer adapter is disposed', async () => {
+    const f = setup()
+    const session = await f.adapter.prepare({
+      runId: 'p',
+      mode: 'edit',
+      state: await f.adapter.capture(),
+    })
+    await session.execute(replace())
+    f.adapter.dispose()
+    expect(f.bridge.workspaceReleaseRollback).toHaveBeenCalledExactlyOnceWith('checkpoint-0')
+    expect(f.bridge.workspaceRollback).not.toHaveBeenCalled()
   })
 
   it('rejects manual edits or another document generation after capture', async () => {

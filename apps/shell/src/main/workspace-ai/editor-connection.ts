@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import type { IpcMain, IpcMainEvent, WebContents } from 'electron'
 import type { WorkspaceAdapterState } from '@genoffice/agent-core'
+import { USER_SKILL_TEMPLATE_MAX_BYTES } from '@genoffice/electron-utils/user-skills-channels'
 import {
   WORKSPACE_EDITOR_CHANNELS,
+  isWorkspaceEditQueueSnapshot,
   type WorkspaceEditorOperation,
   type WorkspaceEditorReply,
   type WorkspaceEditorSession,
@@ -34,6 +36,28 @@ const sameState = (left: WorkspaceAdapterState, right: WorkspaceAdapterState) =>
 
 function validValue(operation: WorkspaceEditorOperation, value: unknown): boolean {
   switch (operation.kind) {
+    case 'save-project-copy':
+      return typeof value === 'boolean'
+    case 'edit-queue':
+      return value === null || isWorkspaceEditQueueSnapshot(value)
+    case 'template':
+      return (
+        value === null ||
+        (record(value) &&
+          text(value.fileName) &&
+          value.fileName.length <= 1024 &&
+          !/[\\/]/.test(value.fileName) &&
+          !value.fileName.includes('\0') &&
+          typeof value.title === 'string' &&
+          value.title.length <= 10_000 &&
+          typeof value.redacted === 'boolean' &&
+          (operation.mode === 'info'
+            ? value.bytes === null
+            : value.bytes === null ||
+              (value.bytes instanceof Uint8Array &&
+                value.bytes.byteLength <= USER_SKILL_TEMPLATE_MAX_BYTES)) &&
+          (operation.mode !== 'as-is' || value.redacted === false))
+      )
     case 'describe':
       return (
         record(value) &&
@@ -49,6 +73,12 @@ function validValue(operation: WorkspaceEditorOperation, value: unknown): boolea
     case 'capture':
     case 'rollback':
       return stateOf(value)
+    case 'refresh':
+      return (
+        stateOf(value) &&
+        value.instanceId === operation.state.instanceId &&
+        value.selectionId === operation.state.selectionId
+      )
     case 'read':
       return (
         record(value) &&
@@ -100,6 +130,7 @@ function validValue(operation: WorkspaceEditorOperation, value: unknown): boolea
     case 'verify':
       return value === null || typeof value === 'string'
     case 'release':
+    case 'writer-update':
     case 'settle':
       return value === null
   }
@@ -121,6 +152,7 @@ export class WorkspaceEditorConnection {
   private session: Pick<WorkspaceEditorSession, 'id' | 'runId'> | null = null
   private hostId: string | null = null
   private readonly changes = new Set<() => void>()
+  private readonly queueChanges = new Set<() => void>()
   private readonly closed = new Set<() => void>()
 
   constructor(
@@ -149,6 +181,13 @@ export class WorkspaceEditorConnection {
     this.changes.add(handler)
     return () => {
       this.changes.delete(handler)
+    }
+  }
+
+  onQueueChanged(handler: () => void): () => void {
+    this.queueChanges.add(handler)
+    return () => {
+      this.queueChanges.delete(handler)
     }
   }
 
@@ -184,7 +223,11 @@ export class WorkspaceEditorConnection {
         if (kind === 'timeout') this.dispose()
       }
       const abort = () => cancel('cancelled')
-      const timer = setTimeout(() => cancel('timeout'), this.timeoutMs)
+      const timeout =
+        operation.kind === 'execute' && operation.call.name === 'write_document'
+          ? Math.max(this.timeoutMs, 30 * 60_000)
+          : this.timeoutMs
+      const timer = setTimeout(() => cancel('timeout'), timeout)
       this.pending.set(id, {
         operation: message.operation,
         resolve: (value) => resolve(value as WorkspaceEditorValues[O['kind']]),
@@ -231,6 +274,7 @@ export class WorkspaceEditorConnection {
     for (const notify of this.closed) notify()
     this.closed.clear()
     this.changes.clear()
+    this.queueChanges.clear()
   }
 
   private readonly onReply = (event: IpcMainEvent, reply: WorkspaceEditorReply): void => {
@@ -291,7 +335,7 @@ export class WorkspaceEditorConnection {
       !text(update.hostId)
     )
       return
-    if (update.kind !== 'ready' && update.kind !== 'changed' && update.kind !== 'disposed') return
+    if (!['ready', 'changed', 'queue-changed', 'disposed'].includes(update.kind)) return
     if (!this.available) {
       this.dispose()
       return
@@ -302,6 +346,7 @@ export class WorkspaceEditorConnection {
     }
     this.hostId = update.hostId
     if (update.kind === 'changed') for (const notify of this.changes) notify()
+    if (update.kind === 'queue-changed') for (const notify of this.queueChanges) notify()
   }
 
   private readonly onGone = (): void => {

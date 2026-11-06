@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const ko = {
+  sendScope:
+    '요청을 보내면 수정 대상의 내용과 직접 고른 참고 범위·첨부·스킬·프로젝트 맥락이 선택한 AI로 전송됩니다.',
+  attachmentLimit: '한 번에 파일을 20개까지 첨부할 수 있습니다.',
+  polishPrompt:
+    '고정한 선택 범위가 있으면 그 부분을, 없으면 문서 전체를 다듬어 더 명확하고 매끄럽게 만들어 주세요.',
   conversation: '대화',
   newConversation: '새 대화',
   target: '수정 대상',

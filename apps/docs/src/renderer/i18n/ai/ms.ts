@@ -35,6 +35,8 @@ export const ms = {
   aiChipChartData: 'Kemas kini data carta',
   aiChipChartTitle: 'Tukar tajuk carta',
   aiChipTableEdit: 'Laraskan baris/lajur',
+  aiQueueTransferFailed:
+    'Permintaan suntingan tidak dapat dipindahkan. Baris gilir tidak berubah. Semak dokumen dan hantar semula.',
   aiQueueTitle: 'Perubahan dalam baris gilir',
   aiQueueHint:
     'Klik baris untuk mencari bahagiannya; penghantaran menggunakan semua perubahan dalam satu permintaan',

@@ -35,6 +35,8 @@ export const id = {
   aiChipChartData: 'Perbarui data grafik',
   aiChipChartTitle: 'Ubah judul grafik',
   aiChipTableEdit: 'Sesuaikan baris/kolom',
+  aiQueueTransferFailed:
+    'Permintaan penyuntingan tidak dapat dipindahkan. Antrean tetap utuh. Periksa dokumen lalu kirim lagi.',
   aiQueueTitle: 'Perubahan dalam antrean',
   aiQueueHint:
     'Klik baris untuk menemukan bagiannya; pengiriman menerapkan semua perubahan dalam satu permintaan',

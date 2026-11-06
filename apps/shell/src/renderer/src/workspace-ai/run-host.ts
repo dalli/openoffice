@@ -1,23 +1,31 @@
+import type { Lang } from '@genoffice/i18n'
+import { WorkspaceDocumentWriter } from './doc-writer'
+import { aiLangDirectiveFor } from '../../../../../docs/src/renderer/i18n/ai-language'
 import {
   AgentLoop,
   composeSkills,
   createMcpPermissionStore,
   sanitizeAgentPayload,
+  READ_SKILL_FILE_TOOL,
+  USE_SKILL_TOOL,
   type AgentImage,
   type AgentSkill,
   type AgentTransport,
   type McpPermissionAnswer,
   type McpPermissionStore,
   type ToolExecution,
+  type AgentTokenUsage,
+  type MindMapTreeNode,
 } from '@genoffice/agent-core'
-import type { ChatMessage, ToolActivity } from '@genoffice/project-store'
-import type { AiSendGate } from '@genoffice/ui'
+import type { ChatAttachment, ChatMessage, ToolActivity } from '@genoffice/project-store'
+import { isSkillCardSavedMessage, type AiSendGate } from '@genoffice/ui'
 import type {
   WorkspaceAiBoundRun,
   WorkspaceAiRunState,
   WorkspaceConversationOrigin,
   WorkspaceProjectBinding,
   WorkspaceBoundDocument,
+  WorkspaceDocumentIdentity,
 } from '../../../shared/workspace-ai-api'
 import type {
   WorkspaceExecutionController,
@@ -31,6 +39,7 @@ import {
   type WorkspaceComposer,
   type WorkspaceConversationRun,
 } from './conversations'
+import { isProjectTool, toolRecordOf } from '../kb-ask-project'
 
 type Awaitable<T> = T | Promise<T>
 const sameBound = (a: WorkspaceBoundDocument, b: WorkspaceBoundDocument): boolean =>
@@ -46,8 +55,10 @@ const sameBound = (a: WorkspaceBoundDocument, b: WorkspaceBoundDocument): boolea
 export interface WorkspaceExecutionBridge {
   enqueue(
     request: Parameters<WorkspaceExecutionController['enqueue']>[0],
+    attachments?: ChatAttachment[],
   ): Awaitable<WorkspaceAiBoundRun>
   startNext(): Promise<WorkspaceStartedRun | null>
+  updateWriter?: WorkspaceExecutionController['updateWriter']
   execute: WorkspaceExecutionController['execute']
   verifyResponse: WorkspaceExecutionController['verifyResponse']
   complete: WorkspaceExecutionController['complete']
@@ -61,9 +72,16 @@ export interface WorkspaceRunPreparation {
   project: WorkspaceProjectBinding | null
   skills: AgentSkill[]
   images?: AgentImage[]
+  /** Model-only skill instructions; the person's text alone is shown and stored. */
+  userText?: string
+  /** Wrap the complete composition, including document tools, in the existing outbound guards. */
+  guard?(skill: AgentSkill): AgentSkill
+  beforeTurn?(): Promise<void>
+  onStart?(): void
   dispose(): void
 }
 export interface WorkspaceRunHostDeps {
+  lang?(): Lang
   execution: WorkspaceExecutionBridge
   load(
     origin: WorkspaceConversationOrigin,
@@ -75,8 +93,11 @@ export interface WorkspaceRunHostDeps {
   /** The panel supplies useAiSendGate.admit/admitQueued; blocked sends remain in the composer. */
   admit(request: WorkspacePendingSend, queued: boolean): boolean
   gate(): AiSendGate
+  /** Called only after the send gate admits the captured request, never on selection/open. */
+  captureProject?(request: WorkspacePendingSend): Promise<WorkspaceProjectBinding | null>
+  discardProject?(conversationId: string, project: WorkspaceProjectBinding): Promise<void>
   /** One existing createIpcTransport per conversation, with its original errors/context/usage wiring. */
-  createTransport(id: string): AgentTransport & { dispose?(): void }
+  createTransport(id: string, purpose?: 'writer'): AgentTransport & { dispose?(): void }
   /** Existing attachment, project, skill, drive/outbound and MCP guards stay in this factory. */
   prepare(
     input: WorkspaceComposer,
@@ -84,15 +105,19 @@ export interface WorkspaceRunHostDeps {
     permissions: McpPermissionStore,
   ): Promise<WorkspaceRunPreparation>
   toolsAllowed?(): boolean
+  onUsage?(conversationId: string, usage: AgentTokenUsage): void
   errorText(error: unknown): string
 }
 export interface WorkspacePendingSend {
+  /** Human-readable echo of an editor batch; model instructions remain in input.text. */
+  displayText?: string
   conversationId: string
   targetId: string
   referenceIds: readonly string[]
   input: WorkspaceComposer
 }
 interface Runtime {
+  writer: WorkspaceDocumentWriter
   loop: AgentLoop
   permissions: McpPermissionStore
   active: Work | null
@@ -103,6 +128,11 @@ export interface WorkspaceRollbackCard {
   id: string
   label: string
   state: 'applied' | 'restoring' | 'reverted' | 'refused'
+}
+export interface WorkspaceMindMapCard {
+  readonly id: string
+  readonly document: WorkspaceDocumentIdentity
+  readonly tree: MindMapTreeNode
 }
 interface RollbackCard extends WorkspaceRollbackCard {
   handle: WorkspaceRollbackHandle
@@ -134,6 +164,7 @@ export class WorkspaceRunHost {
   readonly conversations: WorkspaceConversations<Runtime>
   private readonly queue: Work[] = []
   private readonly cards = new Map<string, RollbackCard[]>()
+  private readonly maps = new Map<string, WorkspaceMindMapCard[]>()
   private readonly listeners = new Set<() => void>()
   private revision = 0
   private pumping = false
@@ -143,6 +174,10 @@ export class WorkspaceRunHost {
   private readonly dirtyHistory = new Map<string, number>()
   private readonly historyReads = new Map<string, Promise<void>>()
   private readonly blockedHistory = new Set<string>()
+  private readonly admissions = new Map<
+    string,
+    { run: WorkspaceConversationRun; cancelled: boolean }
+  >()
   private admitting: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly deps: WorkspaceRunHostDeps) {
@@ -159,6 +194,30 @@ export class WorkspaceRunHost {
     }
   }
   version = (): number => this.revision
+  /** UI-only, bounded to this window session. Never enters model history or saved messages. */
+  writing(id: string) {
+    return this.conversations.runtime(id).writer.state
+  }
+  decideWriting(id: string, writerId: string, keep: boolean) {
+    this.conversations.runtime(id).writer.answer(writerId, keep)
+  }
+  stopWriting(id: string, writerId: string) {
+    this.conversations.runtime(id).writer.stopWriting(writerId)
+  }
+  mindMaps(id: string): readonly WorkspaceMindMapCard[] {
+    return this.maps.get(id) ?? []
+  }
+  /** An explicit card save records only its existing saved-card marker in the original history. */
+  async appendNote(id: string, message: Omit<ChatMessage, 'seq' | 'ts'>): Promise<void> {
+    if (this.closed) return
+    try {
+      if ((await this.deps.append(this.conversations.state(id).origin, message)) === 'unwritable')
+        throw new Error('history-unwritable')
+      if (!this.closed) this.historyChanged(this.conversations.state(id).origin)
+    } catch (error) {
+      if (!this.closed) this.conversations.historyError(id, this.deps.errorText(error))
+    }
+  }
   rebindHistory(
     previous: WorkspaceConversationOrigin,
     origin: Extract<WorkspaceConversationOrigin, { kind: 'legacy-document' }>,
@@ -211,7 +270,11 @@ export class WorkspaceRunHost {
         return
       this.conversations
         .runtime(id)
-        .loop.restore(history.messages.map(({ role, text }) => ({ role, text })))
+        .loop.restore(
+          history.messages
+            .filter((m) => !isSkillCardSavedMessage(m))
+            .map(({ role, text }) => ({ role, text })),
+        )
       this.conversations.replaceHistory(id, history.messages, history.foreign)
       this.dirtyHistory.delete(id)
     })()
@@ -242,6 +305,7 @@ export class WorkspaceRunHost {
     const permissions = createMcpPermissionStore()
     const off = permissions.subscribe(() => this.notify())
     const runtime: Runtime = {
+      writer: new WorkspaceDocumentWriter(() => this.notify()),
       active: null,
       permissions,
       cancel: () => {
@@ -254,7 +318,33 @@ export class WorkspaceRunHost {
         transport.dispose?.()
       },
       loop: new AgentLoop({
-        transport,
+        transport: {
+          stream: (request, callbacks) => {
+            const work = runtime.active
+            if (!work?.preparation?.beforeTurn) return transport.stream(request, callbacks)
+            let cancelled = false
+            let inner: ReturnType<AgentTransport['stream']> | undefined
+            void work.preparation
+              .beforeTurn()
+              .then(() => {
+                if (cancelled) return
+                if (this.closed || work.finishing || runtime.active !== work)
+                  throw new Error('Workspace execution stopped')
+                inner = transport.stream(request, callbacks)
+              })
+              .catch((error: unknown) => {
+                if (!cancelled) callbacks.onError(this.deps.errorText(error))
+              })
+            return {
+              cancel() {
+                if (cancelled) return
+                cancelled = true
+                if (inner) inner.cancel()
+                else queueMicrotask(() => callbacks.onDone())
+              },
+            }
+          },
+        },
         toolsAllowed: this.deps.toolsAllowed,
         skill: {
           id: 'workspace-host',
@@ -273,6 +363,7 @@ export class WorkspaceRunHost {
             runtime.active?.skill?.verifyResponse?.(text, calls) ?? null,
         },
         events: {
+          onUsage: (usage) => this.deps.onUsage?.(id, usage),
           onText: (text) => {
             if (runtime.active)
               this.conversations.deliver(runtime.active.ticket, { progress: text })
@@ -280,12 +371,34 @@ export class WorkspaceRunHost {
           onToolExecuted: ({ call, execution }) => {
             const work = runtime.active
             if (!work || work.finishing) return
-            work.tools.push({
-              name: call.name,
-              summary: execution.summary,
-              isError: execution.isError,
-              output: execution.output.slice(0, 16_000),
-            })
+            if (
+              !execution.isError &&
+              execution.display?.kind === 'mindmap' &&
+              execution.display.tree
+            ) {
+              const card = {
+                id: `${work.ticket.generation}:${call.id}`,
+                document: structuredClone(work.binding.target.document),
+                tree: structuredClone(execution.display.tree),
+              }
+              this.maps.set(id, [...(this.maps.get(id) ?? []), card].slice(-16))
+            }
+            work.tools.push(
+              isProjectTool(call.name)
+                ? toolRecordOf(call, execution)
+                : {
+                    name: call.name,
+                    summary: execution.summary,
+                    isError: execution.isError,
+                    ...(call.name === 'read_attachment' ||
+                    call.name === 'drive_search' ||
+                    call.name === 'drive_read' ||
+                    call.name === USE_SKILL_TOOL ||
+                    call.name === READ_SKILL_FILE_TOOL
+                      ? {}
+                      : { output: execution.output.slice(0, 16_000) }),
+                  },
+            )
             this.notify()
           },
           onDone: (result) => {
@@ -304,7 +417,9 @@ export class WorkspaceRunHost {
         },
       }),
     }
-    runtime.loop.restore(messages.map(({ role, text }) => ({ role, text })))
+    runtime.loop.restore(
+      messages.filter((m) => !isSkillCardSavedMessage(m)).map(({ role, text }) => ({ role, text })),
+    )
     return runtime
   }
 
@@ -331,20 +446,36 @@ export class WorkspaceRunHost {
     if (!input.text.trim() || !input.target) return Promise.resolve(null)
     input.text = sanitizeAgentPayload(input.text)
     const references = [...request.referenceIds]
-    const pending = { conversationId: id, targetId, referenceIds: references, input }
+    const pending = {
+      conversationId: id,
+      targetId,
+      referenceIds: references,
+      input,
+      ...(request.displayText ? { displayText: sanitizeAgentPayload(request.displayText) } : {}),
+    }
     if (!this.deps.admit(structuredClone(pending), false) || this.deps.gate().kind !== 'run')
       return Promise.resolve(null)
     const ticket = this.conversations.enqueue(id, crypto.randomUUID(), input)
+    const admission = { run: ticket, cancelled: false }
+    this.admissions.set(ticket.runId, admission)
     const task = this.admitting.then(async () => {
-      if (this.closed) return null
       try {
-        const binding = await this.deps.execution.enqueue({
-          conversationId: id,
-          runId: ticket.runId,
-          targetId,
-          referenceIds: references,
-          project: input.project,
-        })
+        if (this.closed || admission.cancelled) return null
+        if (this.deps.captureProject) {
+          input.project = await this.deps.captureProject(structuredClone(pending))
+          if (this.closed || admission.cancelled) return null
+          this.conversations.bindProject(ticket, input.project)
+        }
+        const binding = await this.deps.execution.enqueue(
+          {
+            conversationId: id,
+            runId: ticket.runId,
+            targetId,
+            referenceIds: references,
+            project: input.project,
+          },
+          input.attachments,
+        )
         if (
           !sameBound(input.target!, binding.target) ||
           input.references.length !== binding.references.length ||
@@ -357,7 +488,7 @@ export class WorkspaceRunHost {
           await this.deps.execution.cancel(binding)
           throw new Error('Queued document selection does not match the draft')
         }
-        if (this.closed) {
+        if (this.closed || admission.cancelled) {
           await this.deps.execution.cancel(binding)
           return null
         }
@@ -382,15 +513,19 @@ export class WorkspaceRunHost {
           done,
           resolve,
         }
+        this.admissions.delete(ticket.runId)
         this.queue.push(work)
         void this.pump()
         return { run: ticket, done }
       } catch (error) {
-        if (!this.closed) {
+        if (!this.closed && !admission.cancelled) {
           this.conversations.fail(ticket, this.deps.errorText(error))
           this.conversations.finish(ticket, true)
         }
         return null
+      } finally {
+        this.admissions.delete(ticket.runId)
+        if (input.project) await this.deps.discardProject?.(id, input.project).catch(() => {})
       }
     })
     this.admitting = task.catch(() => {})
@@ -471,14 +606,60 @@ export class WorkspaceRunHost {
               ].join('\n\n'),
             executeTool: async (call, signal): Promise<ToolExecution> => {
               if (signal?.aborted || started.signal.aborted) throw new Error('cancelled')
-              return (
-                await this.deps.execution.execute(work.binding, work.binding.target.document, call)
-              ).result
+              const executing = this.deps.execution.execute(
+                work.binding,
+                work.binding.target.document,
+                call,
+              )
+              const update = this.deps.execution.updateWriter
+              if (call.name !== 'write_document' || !update) return (await executing).result
+              const controller = new AbortController()
+              const writerSignal = AbortSignal.any([
+                started.signal,
+                controller.signal,
+                ...(signal ? [signal] : []),
+              ])
+              const writerTransport = this.deps.createTransport(
+                work.ticket.conversationId,
+                'writer',
+              )
+              const writing = runtime.writer.run({
+                call,
+                instruction: work.input.text,
+                directive: aiLangDirectiveFor(this.deps.lang?.() ?? 'en'),
+                transport: writerTransport,
+                onUsage: (usage) => this.deps.onUsage?.(work.ticket.conversationId, usage),
+                signal: writerSignal,
+                beforeTurn: async () => {
+                  await work.preparation?.beforeTurn?.()
+                },
+                update: (value) => update.call(this.deps.execution, work.binding, call.id, value),
+              })
+              try {
+                const first = await Promise.race([
+                  executing.then((value) => ({ kind: 'executed' as const, value })),
+                  writing.then(() => ({ kind: 'written' as const })),
+                ])
+                if (first.kind === 'executed') return first.value.result
+                return (await executing).result
+              } catch (error) {
+                try {
+                  await this.deps.execution.cancel(work.binding)
+                } catch {
+                  // The editor or main invalidation may already have stopped this run.
+                }
+                throw error
+              } finally {
+                controller.abort()
+                await writing.catch(() => {})
+                writerTransport.dispose?.()
+              }
             },
             verifyResponse: (text, calls) =>
               this.deps.execution.verifyResponse(work.binding, text, calls),
           }
-          work.skill = composeSkills('workspace', '', [document, ...work.preparation.skills])
+          const composed = composeSkills('workspace', '', [document, ...work.preparation.skills])
+          work.skill = work.preparation.guard?.(composed) ?? composed
           if (this.dirtyHistory.has(work.ticket.conversationId))
             throw new Error('Conversation history changed while preparing')
           if (!this.conversations.start(work.ticket))
@@ -489,15 +670,16 @@ export class WorkspaceRunHost {
               seq: (messages.at(-1)?.seq ?? -1) + 1,
               ts: new Date().toISOString(),
               role: 'user',
-              text: work.input.text,
+              text: work.request.displayText ?? work.input.text,
               attachments: work.input.attachments,
               skills: work.input.skills,
             },
           })
+          work.preparation.onStart?.()
           work.loopSettled = new Promise<void>((resolve) => {
             work.settleLoop = resolve
           })
-          runtime.loop.run(work.input.text, work.preparation.images)
+          runtime.loop.run(work.preparation.userText ?? work.input.text, work.preparation.images)
         } catch (error) {
           await this.end(work, error)
         }
@@ -524,6 +706,21 @@ export class WorkspaceRunHost {
         }
         if (!this.closed) {
           const runtime = this.conversations.runtime(id)
+          const composer = this.conversations.state(id).composer
+          if (
+            !work.loopSettled &&
+            !composer.text &&
+            !composer.attachments.length &&
+            !composer.skills.length
+          )
+            this.conversations.edit(id, {
+              composer: {
+                ...composer,
+                text: work.request.displayText ?? work.input.text,
+                attachments: work.input.attachments,
+                skills: work.input.skills,
+              },
+            })
           if (runtime.active === work && work.loopSettled) {
             runtime.permissions.denyAll()
             runtime.loop.cancel()
@@ -538,7 +735,7 @@ export class WorkspaceRunHost {
         const cards = this.cards.get(id) ?? []
         cards.push({
           id: rollback.rollbackId,
-          label: work.input.text.slice(0, 80),
+          label: (work.request.displayText ?? work.input.text).slice(0, 80),
           state: 'applied',
           handle: rollback,
         })
@@ -562,7 +759,7 @@ export class WorkspaceRunHost {
           // Resolve the current source after first-save rebind, never a captured file path.
           const first = await this.deps.append(this.conversations.state(id).origin, {
             role: 'user',
-            text: work.input.text,
+            text: work.request.displayText ?? work.input.text,
             attachments: work.input.attachments,
             skills: work.input.skills,
           })
@@ -605,6 +802,17 @@ export class WorkspaceRunHost {
   }
 
   async cancel(run: WorkspaceConversationRun): Promise<void> {
+    const admission = this.admissions.get(run.runId)
+    if (
+      admission &&
+      admission.run.controllerId === run.controllerId &&
+      admission.run.conversationId === run.conversationId &&
+      admission.run.generation === run.generation
+    ) {
+      admission.cancelled = true
+      this.conversations.fail(admission.run, this.deps.errorText(new Error('cancelled')))
+      this.conversations.finish(admission.run, true)
+    }
     const work = [this.active, ...this.queue].find(
       (item) =>
         item?.ticket.controllerId === run.controllerId &&
@@ -612,7 +820,16 @@ export class WorkspaceRunHost {
         item.ticket.runId === run.runId &&
         item.ticket.generation === run.generation,
     )
-    if (work) await this.end(work, new Error('cancelled'))
+    if (work) {
+      if (work.finishing) {
+        try {
+          await this.deps.execution.cancel(work.binding)
+        } catch {
+          // A fully completed run has no pending first save to cancel.
+        }
+      }
+      await this.end(work, new Error('cancelled'))
+    }
   }
   /** Called by the panel when the shared gate changes; it can resume only previously submitted work. */
   wake(): void {
@@ -647,6 +864,7 @@ export class WorkspaceRunHost {
   dispose(): void {
     if (this.closed) return
     this.closed = true
+    for (const admission of this.admissions.values()) admission.cancelled = true
     for (const work of [this.active, ...this.queue]) {
       if (!work) continue
       work.off()
@@ -659,6 +877,7 @@ export class WorkspaceRunHost {
     this.queue.length = 0
     this.conversations.dispose()
     this.cards.clear()
+    this.maps.clear()
     this.listeners.clear()
   }
 }

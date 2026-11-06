@@ -2,6 +2,20 @@
 
 Mọi trình soạn thảo đều có thể gọi bảng AI: chọn một nội dung, đưa ra chỉ dẫn, xem kết quả hiện dần.
 
+## Trợ lý dùng chung của cửa sổ
+
+Mở bảng dùng chung bằng **Trợ lý AI** trên thanh thẻ của cửa sổ chính. Ban đầu bảng đóng. Tạo hoặc chọn cuộc trò chuyện, rồi chọn tài liệu cần chỉnh sửa và phạm vi tham khảo từ các tài liệu HWP/HWPX, DOCX/ODT hoặc Markdown/văn bản đang mở trong cùng cửa sổ. Chuyển thẻ hoặc thu gọn bảng vẫn giữ bản nháp và công việc đang chạy. **Dừng** sẽ kết thúc công việc. Nhập văn bản hoặc đổi cuộc trò chuyện không gửi yêu cầu. Các bảng AI cũ của trình soạn thảo vẫn dùng được.
+
+Khi chọn tài liệu Word làm đích, các nút Tóm tắt, Chỉnh sửa, Định dạng và Sơ đồ tư duy điền yêu cầu vào ô nhập. Nhấn Gửi để thực hiện; chỉnh sửa dùng phần văn bản được chọn ban đầu nếu có. Sơ đồ ở lại trong cuộc trò chuyện của nó và hỗ trợ thu gọn nhánh, tải PNG/SVG. Nhấn một chủ đề sẽ điền câu hỏi về cùng tài liệu đích; nếu đã đổi đích, hãy chọn lại tài liệu gốc trước.
+
+Với tài liệu Word làm đích, nội dung dài xuất hiện trong tài liệu khi đang được viết. Dừng trong phần tiến độ viết cho phép giữ hoặc bỏ nội dung chưa hoàn tất. Dừng cạnh ô nhập kết thúc toàn bộ lượt chạy và xóa bản nháp chưa xong. Lựa chọn vẫn nằm trong cuộc trò chuyện gốc. Có thể hoàn tác nội dung đã viết xong hoặc giữ lại bằng lệnh hoàn tác lượt chạy này.
+
+Trong cửa sổ chính, các thao tác AI của Word từ dải băng, menu, F7 và menu chuột phải mở cuộc trò chuyện dùng chung mới với tài liệu và vùng chọn vừa bấm. Các bước xác nhận và chạy ngay vẫn giữ nguyên; mở hoặc thu gọn trợ lý giữ cuộc trò chuyện hiện tại. Cửa sổ tách rời hoặc độc lập, máy chủ chưa sẵn sàng dùng bảng cũ. Bạn vẫn có thể mở bảng cũ từ thanh thu gọn.
+
+Trong cửa sổ chính, thêm yêu cầu sửa vùng chọn Word vào hàng đợi sẽ mở cuộc trò chuyện dùng chung của tài liệu đó. Thẻ cho phép tìm đoạn văn, sửa chỉ dẫn, xóa mục hoặc xác nhận xóa toàn bộ hàng đợi. Gửi sẽ chuyển nhóm yêu cầu sang cuộc trò chuyện dùng chung mới; nếu kết nối bị chặn, yêu cầu vẫn là bản nháp. Chuyển giao thất bại giữ nguyên hàng đợi và tài liệu đã thay đổi không dùng vị trí cũ. Cửa sổ tách rời và độc lập vẫn dùng bảng cũ.
+
+Trong cửa sổ chính, bản sao mẫu kỹ năng Word chuyển yêu cầu và các thẻ kỹ năng một lần sang cuộc trò chuyện dùng chung mới. Nếu kết nối bị chặn, yêu cầu được giữ lại ở đó dưới dạng bản nháp. Bản sao trong dự án dùng ngữ cảnh của dự án gốc và được lưu vào thư mục đó với tên chưa được dùng sau khi chạy thành công. Bản xem trước mẫu trống và trường hợp máy chủ dùng chung không khả dụng sẽ dùng bảng trình soạn thảo hiện có.
+
 ## Mở và sử dụng
 
 - Bảng này cần một AI đã kết nối. Khi chưa có, nó hiển thị các thẻ kết nối thay vì báo lỗi; xem [Kết nối gói đăng ký](help://subscription).

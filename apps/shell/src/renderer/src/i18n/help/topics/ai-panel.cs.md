@@ -2,6 +2,20 @@
 
 Každý editor může vyvolat panel AI: vyberte něco, zadejte pokyn a sledujte výsledek, který se přenáší postupně.
 
+## Společný asistent okna
+
+Společný panel otevřete tlačítkem **Asistent AI** na liště karet hlavního okna. Zpočátku je zavřený. Vytvořte nebo vyberte konverzaci a potom dokument k úpravě a referenční rozsahy z dokumentů HWP/HWPX, DOCX/ODT nebo Markdown/text otevřených ve stejném okně. Přepínání karet a sbalení panelu zachovává koncepty i probíhající úlohy. **Zastavit** ukončí úlohu. Psaní ani změna konverzace neodesílají požadavky. Dosavadní panely AI editorů zůstávají dostupné.
+
+Pokud je cílem dokument Word, tlačítka Shrnutí, Úprava textu, Formátování a Myšlenková mapa vyplní vstupní pole. Požadavek spustí až Odeslat; úprava použije původně vybraný text, pokud je nějaký vybrán. Mapy zůstávají ve své konverzaci a umožňují sbalovat větve a stahovat PNG/SVG. Kliknutí na téma připraví otázku ke stejnému cíli; po změně cíle nejprve znovu vyberte původní dokument.
+
+U dokumentu Word se dlouhý text zobrazuje během psaní. Zastavit u průběhu psaní umožní ponechat nebo zahodit dosavadní text. Zastavit vedle vstupního pole ukončí celé spuštění a odstraní nedokončený koncept. Volba zůstává v původní konverzaci. Dokončený nebo ponechaný text lze vrátit zpět příkazem pro vrácení tohoto spuštění.
+
+V hlavním okně otevřou akce AI Wordu z pásu karet, nabídky, klávesy F7 a místní nabídky novou společnou konverzaci s příslušným dokumentem a výběrem. Dosavadní potvrzení a okamžité provedení zůstávají; otevření nebo sbalení asistenta zachová aktuální konverzaci. Oddělená či samostatná okna, nepřipravený host používají dosavadní panel. Lze jej stále otevřít ze sbalené lišty.
+
+V hlavním okně otevře přidání úpravy výběru Wordu do fronty společnou konverzaci dokumentu. Karta umožňuje najít pasáže, upravit pokyny, odebrat položky nebo potvrdit vymazání fronty. Odeslání předá dávku nové společné konverzaci; při blokovaném připojení zůstane jako koncept. Neúspěšné předání zachová frontu a změněný dokument nepoužije staré pozice. Oddělená a samostatná okna si ponechají dosavadní panel.
+
+V hlavním okně předá kopie šablony dovednosti Word svůj požadavek a štítky dovedností jednou do nové společné konverzace. Při zablokovaném připojení tam požadavek zůstane jako koncept. Kopie v projektech používají kontext původního projektu a po úspěšném dokončení se uloží do jeho složky pod volným názvem. Náhledy prázdných šablon a nedostupní společní hostitelé používají stávající panel editoru.
+
 ## Otevření a používání
 
 - Panel potřebuje připojenou AI. Není-li žádná připojena, zobrazí místo chyby karty pro připojení; viz [Připojení předplatného](help://subscription).

@@ -37,6 +37,8 @@ export const it = {
   aiChipChartData: 'Aggiorna i dati del grafico',
   aiChipChartTitle: 'Modifica il titolo del grafico',
   aiChipTableEdit: 'Regola righe/colonne',
+  aiQueueTransferFailed:
+    'Impossibile trasferire le modifiche. La coda è invariata. Controlla il documento e invia di nuovo.',
   aiQueueTitle: 'Modifiche in coda',
   aiQueueHint:
     "Fai clic su una riga per individuare il passaggio; con l'invio tutte le modifiche vengono applicate in un'unica richiesta",

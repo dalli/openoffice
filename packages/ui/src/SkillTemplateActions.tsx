@@ -11,12 +11,16 @@ import {
   type TemplateDocument,
 } from './skill-template-model'
 
-/** The redaction answer of a document, read once per card (null while reading) */
-function useRedacted(read: (() => boolean | Promise<boolean>) | null): boolean | null {
+/** Reads metadata when the template actions become available; null while reading. */
+function useRedacted(
+  read: (() => boolean | Promise<boolean>) | null,
+  enabled = true,
+): boolean | null {
   const [redacted, setRedacted] = useState<boolean | null>(null)
   const readRef = useRef(read)
   readRef.current = read
   useEffect(() => {
+    if (!enabled) return
     let live = true
     const current = readRef.current
     if (!current) {
@@ -33,7 +37,7 @@ function useRedacted(read: (() => boolean | Promise<boolean>) | null): boolean |
     return () => {
       live = false
     }
-  }, [])
+  }, [enabled])
   return redacted
 }
 
@@ -58,7 +62,7 @@ export function OriginalTemplateActions({
   onPreviewOpened,
 }: OriginalTemplateActionsProps): React.JSX.Element {
   const { lang, busy, blocked } = context
-  const redacted = useRedacted(document.redacted)
+  const redacted = useRedacted(document.redacted, !busy)
   const [working, setWorking] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   const liveRef = useRef(true)
@@ -69,9 +73,9 @@ export function OriginalTemplateActions({
     }
   }, [])
 
-  const readBytes = async (): Promise<Uint8Array | null> => {
+  const readBytes = async (allowRedacted = true): Promise<Uint8Array | null> => {
     try {
-      return await document.bytes()
+      return await document.bytes({ allowRedacted })
     } catch {
       return null
     }
@@ -95,7 +99,7 @@ export function OriginalTemplateActions({
         if (liveRef.current) setFailure(skillTemplateText(lang, 'asIsRedacted'))
         return
       }
-      const bytes = await readBytes()
+      const bytes = await readBytes(false)
       if (!liveRef.current) return
       if (!bytes) {
         setFailure(skillTemplateText(lang, 'documentUnreadable'))
@@ -132,9 +136,8 @@ export function OriginalTemplateActions({
           })
           .catch(() => null),
       )
-      if (!liveRef.current) return
       if (opened.ok) onPreviewOpened({ tabId: opened.tabId, previewId: opened.previewId })
-      else setFailure(skillTemplateText(lang, 'openFailed'))
+      else if (liveRef.current) setFailure(skillTemplateText(lang, 'openFailed'))
     } finally {
       if (liveRef.current) setWorking(false)
     }
@@ -144,6 +147,11 @@ export function OriginalTemplateActions({
   const asIsReason = redacted ? skillTemplateText(lang, 'asIsRedacted') : null
   return (
     <>
+      {document.fileName && (
+        <p className="ai-skill-card-note" dir="auto">
+          {document.fileName}
+        </p>
+      )}
       <button
         type="button"
         className="ai-skill-card-btn primary"

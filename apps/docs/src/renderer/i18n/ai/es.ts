@@ -36,6 +36,8 @@ export const es = {
   aiChipChartData: 'Actualizar los datos del gráfico',
   aiChipChartTitle: 'Cambiar el título del gráfico',
   aiChipTableEdit: 'Ajustar filas y columnas',
+  aiQueueTransferFailed:
+    'No se pudieron transferir las ediciones. La cola sigue intacta. Revisa el documento y vuelve a enviar.',
   aiQueueTitle: 'Cambios en cola',
   aiQueueHint:
     'Haz clic en una fila para localizar el pasaje; al enviar se aplican todos los cambios en una sola solicitud',

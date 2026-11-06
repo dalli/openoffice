@@ -5,8 +5,8 @@ function fixture() {
   let body = 'original'
   let revision = 1
   let readOnly = false
-  const capture = vi.fn(() => body)
-  const restore = vi.fn((snapshot: unknown) => {
+  const capture = vi.fn((): unknown | Promise<unknown> => body)
+  const restore = vi.fn((snapshot: unknown): void | Promise<void> => {
     body = String(snapshot)
     revision++
   })
@@ -51,6 +51,75 @@ function fixture() {
   }
 }
 describe('editor-owned workspace rollback', () => {
+  it.each(['change', 'abort', 'dispose', 'readOnly'] as const)(
+    'waits for an asynchronous checkpoint and refuses writes after %s',
+    async (action) => {
+      const f = fixture()
+      let finish!: (value: unknown) => void
+      const pending = new Promise<unknown>((resolve) => {
+        finish = resolve
+      })
+      f.capture.mockImplementation(() => pending)
+      const controller = new AbortController()
+      const session = await f.adapter.prepare({
+        runId: 'run',
+        mode: 'edit',
+        state: await f.adapter.capture(),
+      })
+      const writing = session.execute(
+        { id: 'write', name: 'write', input: { text: 'AI edit' } },
+        controller.signal,
+      )
+      await vi.waitFor(() => expect(f.capture).toHaveBeenCalledOnce())
+      expect(f.body()).toBe('original')
+      if (action === 'change') f.change()
+      else if (action === 'abort') controller.abort()
+      else if (action === 'readOnly') f.readOnly()
+      else f.adapter.dispose()
+      finish('original')
+      await expect(writing).rejects.toMatchObject({
+        kind:
+          action === 'change'
+            ? 'stale-document'
+            : action === 'abort'
+              ? 'cancelled'
+              : action === 'readOnly'
+                ? 'read-only'
+                : 'disposed',
+      })
+      expect(f.body()).toBe(action === 'change' ? 'manual edit' : 'original')
+    },
+  )
+
+  it('keeps the adapter busy until asynchronous editor restoration finishes', async () => {
+    const f = fixture()
+    const session = await f.adapter.prepare({
+      runId: 'run',
+      mode: 'edit',
+      state: await f.adapter.capture(),
+    })
+    await session.execute({ id: 'write', name: 'write', input: { text: 'AI edit' } })
+    const last = session.state
+    session.release()
+    let finish!: () => void
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const apply = f.restore.getMockImplementation()!
+    f.restore.mockImplementation(async (snapshot) => {
+      await gate
+      apply(snapshot)
+    })
+    const undoing = f.adapter.rollback!(session.rollbackId!, last)
+    await vi.waitFor(() => expect(f.restore).toHaveBeenCalledOnce())
+    await expect(
+      f.adapter.prepare({ runId: 'next', mode: 'edit', state: last }),
+    ).rejects.toMatchObject({ kind: 'busy' })
+    expect(f.body()).toBe('AI edit')
+    finish()
+    await undoing
+    expect(f.body()).toBe('original')
+  })
   it('restores an entire multi-tool run from one private snapshot and consumes the token once', async () => {
     const f = fixture()
     const state = await f.adapter.capture()

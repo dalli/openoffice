@@ -53,6 +53,8 @@ export interface SkillProposalCardProps {
   renderTemplateActions?: ((context: SkillCardTemplateContext) => React.ReactNode) | undefined
   /** fields that start other than the proposal's (a card carried over to a preview tab) */
   initialDraft?: Partial<SkillCardDraft> | undefined
+  /** A conversation host may keep edits while its card is temporarily out of view. */
+  onDraftChange?: ((draft: SkillCardDraft) => void) | undefined
   onSaved: (id: string, draft: SkillCardDraft) => void
   onCancel: () => void
 }
@@ -71,6 +73,7 @@ export function SkillProposalCard({
   canBeTemplate = false,
   renderTemplateActions,
   initialDraft,
+  onDraftChange,
   onSaved,
   onCancel,
 }: SkillProposalCardProps): React.JSX.Element {
@@ -83,6 +86,9 @@ export function SkillProposalCard({
     ...initialDraft,
   }))
   const [nameState, setNameState] = useState<SkillCardNameState>('checking')
+  useEffect(() => {
+    onDraftChange?.(draft)
+  }, [draft, onDraftChange])
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<SkillCardStringKey | null>(null)
   const liveRef = useRef(true)

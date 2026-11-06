@@ -1,17 +1,37 @@
 import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { AiComposer, Markdown, aiSubscriptionText } from '@genoffice/ui'
+import {
+  AiComposer,
+  Markdown,
+  ProjectNoticeLine,
+  SentSkillChips,
+  isSkillCardSavedMessage,
+  aiSubscriptionText,
+  McpServerButton,
+} from '@genoffice/ui'
+import type { ProjectFolderApi } from '@genoffice/project-store'
 import type { WorkspaceLayout } from '../../../shared/workspace-layout'
 import { workspaceUiScale } from '../../../shared/workspace-layout'
 import { workspaceConversationKey } from './conversations'
 import type { WorkspaceConversationState } from './conversations'
 import type { WorkspacePanelController, WorkspacePanelDocument } from './panel-controller'
 import { WorkspaceRunCards } from './WorkspaceRunCards'
+import {
+  useWorkspaceAttachments,
+  type WorkspaceAttachmentBridge,
+} from './WorkspaceAttachmentControls'
+import { WorkspaceProjectControls } from './WorkspaceProjectControls'
+import { WorkspaceSkillCards, useWorkspaceSkills } from './WorkspaceSkillControls'
+import type { WorkspaceUserSkills } from './user-skills'
+import type { WorkspaceUserMcp } from './user-mcp'
 import { useI18n } from '../locale'
 import { workspacePanelText } from '../i18n/strings-workspace-panel'
 import { workspaceSplitText } from '../i18n/strings-workspace-split'
+import { workspaceDocText, workspaceDocsActions, workspaceMindMapQuestion } from './docs-actions'
+import { MindMapCardView as MindMapCard } from '../../../../../docs/src/renderer/ai/MindMapCardView'
 import './workspace-panel.css'
+import { WorkspaceEditQueue, type WorkspaceEditQueueBridge } from './WorkspaceEditQueue'
 
 export interface WorkspacePanelMount {
   controller: WorkspacePanelController
@@ -22,9 +42,14 @@ export interface WorkspacePanelMount {
   /** Existing model/project/attachment/skill controls are supplied by their guarded service host. */
   composerControls?: ReactNode
   notices?: ReactNode
+  projectBridge?: ProjectFolderApi
+  attachmentBridge?: WorkspaceAttachmentBridge
+  userSkills?: WorkspaceUserSkills
+  userMcp?: WorkspaceUserMcp
+  editQueueBridge?: WorkspaceEditQueueBridge
 }
 
-/** One shell surface. No default production host is installed until all service guards are wired. */
+/** One shell surface, mounted with guarded services by the normal window's host. */
 export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
   const { controller, layout } = mount
   useSyncExternalStore(controller.subscribe, controller.version, controller.version)
@@ -36,6 +61,8 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
   const id = controller.host.conversations.selectedId
   const selected = conversations.find((item) => item.id === id)
   const selection = id ? controller.selection(id) : null
+  const attachments = useWorkspaceAttachments(controller, mount.attachmentBridge, id, lang)
+  useWorkspaceSkills(mount.userSkills)
   const [referenceTab, setReferenceTab] = useState('')
   const [scope, setScope] = useState<'document' | 'selection'>('document')
   const scroll = useRef<HTMLDivElement>(null)
@@ -112,6 +139,8 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
   return createPortal(
     <aside
       className="workspace-ai-surface"
+      onDragOver={attachments.onDragOver}
+      onDrop={attachments.onDrop}
       aria-label={title}
       style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height }}
     >
@@ -199,7 +228,9 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                 aria-label={text('newConversation')}
                 title={text('newConversation')}
                 onClick={() => {
-                  void controller.create()
+                  void controller.create(
+                    selected?.origin.kind === 'project' ? selected.origin.projectId : undefined,
+                  )
                 }}
               >
                 +
@@ -288,6 +319,24 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                 </fieldset>
                 {(targetClosed || referencesClosed) && <p role="status">{text('closed')}</p>}
                 {selection.error && <p role="alert">{text('selectionFailed')}</p>}
+                {selection.target?.binding.document.kind === 'docs' && (
+                  <div className="workspace-ai-quick-actions">
+                    {workspaceDocsActions(lang).map((action) => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        aria-label={action.label}
+                        disabled={!controller.canPreset(id)}
+                        onClick={(event) => {
+                          if (controller.preset(id, action.prompt))
+                            event.currentTarget.closest('aside')?.querySelector('textarea')?.focus()
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div
                   className="workspace-ai-transcript"
                   ref={scroll}
@@ -297,20 +346,99 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                     })
                   }
                 >
-                  {selected.messages.map((message, index) => (
-                    <article
-                      key={`${message.seq}:${index}`}
-                      className={`workspace-ai-message workspace-ai-message-${message.role}`}
-                      dir="auto"
-                    >
-                      <Markdown text={message.text} />
-                    </article>
-                  ))}
+                  {selected.messages
+                    .filter((message) => !isSkillCardSavedMessage(message))
+                    .map((message, index) => (
+                      <article
+                        key={`${message.seq}:${index}`}
+                        className={`workspace-ai-message workspace-ai-message-${message.role}`}
+                        dir="auto"
+                      >
+                        <SentSkillChips
+                          lang={lang}
+                          chips={message.skills}
+                          isAvailable={mount.userSkills?.available}
+                        />
+                        {message.attachments?.length ? (
+                          <ul>
+                            {message.attachments.map((file, index) => (
+                              <li key={index} title={file.path}>
+                                {file.name}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <Markdown text={message.text} />
+                      </article>
+                    ))}
                   {selected.progress && (
                     <div role="status" dir="auto">
                       <Markdown text={selected.progress} />
                     </div>
                   )}
+                  {controller.host.mindMaps(id).map((card) => (
+                    <MindMapCard
+                      key={card.id}
+                      tree={card.tree}
+                      lang={lang}
+                      onAsk={
+                        controller.canPreset(id, card.document)
+                          ? (label) =>
+                              controller.preset(
+                                id,
+                                workspaceMindMapQuestion(lang, label),
+                                card.document,
+                              )
+                          : undefined
+                      }
+                    />
+                  ))}
+                  {controller.host.writing(id) &&
+                    (() => {
+                      const writing = controller.host.writing(id)!
+                      return (
+                        <div
+                          className="workspace-ai-writing"
+                          role="group"
+                          aria-label={workspaceDocText(
+                            lang,
+                            writing.partial ? 'aiPartialTitle' : 'aiWritingDocument',
+                            { blocks: writing.blocks },
+                          )}
+                        >
+                          <p role="status">
+                            {workspaceDocText(
+                              lang,
+                              writing.partial ? 'aiPartialBody' : 'aiWritingDocument',
+                              { blocks: writing.blocks },
+                            )}
+                          </p>
+                          {writing.partial ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => controller.host.decideWriting(id, writing.id, false)}
+                              >
+                                {workspaceDocText(lang, 'aiPartialDiscard')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => controller.host.decideWriting(id, writing.id, true)}
+                              >
+                                {workspaceDocText(lang, 'aiPartialAdopt')}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => controller.host.stopWriting(id, writing.id)}
+                            >
+                              {workspaceDocText(lang, 'aiStop')}
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
                   {selected.error && (
                     <p role="alert" dir="auto">
                       {selected.error}
@@ -327,8 +455,32 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                       refused: text('refused'),
                     }}
                   />
+                  {mount.userSkills && (
+                    <WorkspaceSkillCards
+                      key={id}
+                      skills={mount.userSkills}
+                      host={controller.host}
+                      id={id}
+                      lang={lang}
+                    />
+                  )}
                 </div>
                 {mount.notices}
+                {mount.editQueueBridge && selection.target?.binding.document.kind === 'docs' && (
+                  <WorkspaceEditQueue
+                    key={`${id}:${selection.target.binding.document.windowId}:${selection.target.binding.document.tabId}:${selection.target.binding.document.documentId}:${selection.target.binding.document.generation}`}
+                    bridge={mount.editQueueBridge}
+                    document={selection.target.binding.document}
+                    busy={
+                      conversations.some((conversation) => conversation.runs.length > 0) ||
+                      selection.submitting
+                    }
+                    lang={lang}
+                  />
+                )}
+                {selection.projectNotices.map((notice, index) => (
+                  <ProjectNoticeLine key={index} lang={lang} notice={notice} />
+                ))}
                 <AiComposer
                   value={selected.composer.text}
                   busy={selected.runs.length > 0}
@@ -339,7 +491,31 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                   hintBusy=""
                   sendLabel={t('askSend')}
                   stopLabel={t('askStop')}
-                  footerStart={mount.composerControls}
+                  header={attachments.header}
+                  docs={attachments.docs}
+                  skills={mount.userSkills?.composer(id)}
+                  onPasteFiles={mount.attachmentBridge ? attachments.onPasteFiles : undefined}
+                  footerStart={
+                    <>
+                      {mount.projectBridge && (
+                        <WorkspaceProjectControls
+                          key={`project:${id}`}
+                          controller={controller}
+                          bridge={mount.projectBridge}
+                          lang={lang}
+                        />
+                      )}
+                      {attachments.controls}
+                      {mount.userMcp && (
+                        <McpServerButton
+                          key={`mcp:${id}`}
+                          lang={lang}
+                          state={mount.userMcp.state(id)}
+                        />
+                      )}
+                      {mount.composerControls}
+                    </>
+                  }
                   onChange={(value) =>
                     controller.host.conversations.edit(id, {
                       composer: {
@@ -349,10 +525,12 @@ export function WorkspacePanel({ mount }: { mount: WorkspacePanelMount }) {
                     })
                   }
                   onSend={() => {
-                    void controller.send(id)
+                    if (mount.userSkills) void mount.userSkills.send(id, () => controller.send(id))
+                    else void controller.send(id)
                   }}
                   onQueue={() => {
-                    void controller.send(id)
+                    if (mount.userSkills) void mount.userSkills.send(id, () => controller.send(id))
+                    else void controller.send(id)
                   }}
                   onStop={() => stop(selected)}
                 />

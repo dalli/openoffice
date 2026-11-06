@@ -3,7 +3,7 @@ import {
   createWorkspaceDocumentAdapter,
   type WorkspaceAdapterState,
 } from '../src/workspace-adapter'
-import { hostWorkspaceEditor } from '../src/workspace-editor-host'
+import { hostWorkspaceEditor, type WorkspaceEditorControls } from '../src/workspace-editor-host'
 import {
   workspaceEditorPort,
   WORKSPACE_EDITOR_CHANNELS,
@@ -13,7 +13,7 @@ import {
   type WorkspaceEditorSession,
 } from '../src/workspace-editor-protocol'
 
-function fixture() {
+function fixture(controls?: WorkspaceEditorControls) {
   const listeners = new Map<string, (event: unknown, value: unknown) => void>()
   const responses = new Map<string, WorkspaceEditorReply>()
   const ipc = {
@@ -65,7 +65,7 @@ function fixture() {
     }),
     dispose,
   })
-  const stop = hostWorkspaceEditor(workspaceEditorPort(ipc), adapter, () => busy)
+  const stop = hostWorkspaceEditor(workspaceEditorPort(ipc), adapter, () => busy, controls)
   let sequence = 0
   const emit = (request: WorkspaceEditorRequest) =>
     listeners.get(WORKSPACE_EDITOR_CHANNELS.request)?.({}, request)
@@ -275,4 +275,114 @@ describe('private workspace editor endpoint', () => {
     host.stop()
     expect(host.dispose).toHaveBeenCalledOnce()
   })
+})
+
+describe('workspace queue controls', () => {
+  it('guards the current document and prepared runs, and keeps notifications content-free', async () => {
+    let notify!: () => void
+    const editQueue = vi.fn(async () => ({ version: 'queue-v1', items: [] }))
+    const off = vi.fn()
+    const f = fixture({
+      editQueue,
+      subscribe: (handler) => {
+        notify = handler
+        return off
+      },
+    })
+    const state = f.state()
+    const operation = { kind: 'edit-queue' as const, state, command: { kind: 'list' as const } }
+    expect(await f.request(operation)).toMatchObject({ ok: true, value: { version: 'queue-v1' } })
+    expect(
+      await f.request({ ...operation, state: { ...state, instanceId: 'another' } }),
+    ).toMatchObject({ ok: false, error: 'stale-document' })
+    expect(editQueue).toHaveBeenCalledTimes(1)
+    notify()
+    expect(f.ipc.send.mock.calls.at(-1)).toEqual([
+      WORKSPACE_EDITOR_CHANNELS.event,
+      { kind: 'queue-changed', hostId: expect.any(String) },
+    ])
+    await f.prepare()
+    expect(await f.request(operation)).toMatchObject({ ok: false, error: 'busy' })
+    expect(editQueue).toHaveBeenCalledTimes(1)
+    f.stop()
+    expect(off).toHaveBeenCalledOnce()
+  })
+  it('rejects queue operations in editors without controls', async () => {
+    const f = fixture()
+    expect(
+      await f.request({ kind: 'edit-queue', state: f.state(), command: { kind: 'list' } }),
+    ).toMatchObject({ ok: false, error: 'invalid-call' })
+    f.stop()
+  })
+})
+
+describe('successful project copy save controls', () => {
+  function savingFixture(save: (validate: () => Promise<void>) => Promise<boolean>) {
+    const saveProjectCopy = vi.fn((_projectId: string, validate: () => Promise<void>) =>
+      save(validate),
+    )
+    const f = fixture({ editQueue: async () => null, subscribe: () => () => {}, saveProjectCopy })
+    return {
+      ...f,
+      saveProjectCopy,
+      operation: () => ({
+        kind: 'save-project-copy' as const,
+        runId: 'copy-run',
+        state: f.state(),
+        projectId: 'project-one',
+      }),
+    }
+  }
+  it('passes only the fixed project and a revalidation function to the existing save', async () => {
+    const f = savingFixture(async (validate) => {
+      await validate()
+      return true
+    })
+    expect(await f.request(f.operation())).toMatchObject({ ok: true, value: true })
+    expect(f.saveProjectCopy).toHaveBeenCalledWith('project-one', expect.any(Function))
+    f.stop()
+  })
+  it('refuses a changed document and an active prepared session before saving', async () => {
+    const f = savingFixture(async () => true)
+    const op = f.operation()
+    f.changed()
+    expect(await f.request(op)).toMatchObject({ ok: false, error: 'stale-document' })
+    await f.prepare()
+    expect(await f.request(f.operation())).toMatchObject({ ok: false, error: 'busy' })
+    expect(f.saveProjectCopy).not.toHaveBeenCalled()
+    f.stop()
+  })
+  it.each(['change', 'cancel', 'dispose', 'local-busy'] as const)(
+    'rechecks %s after serialization and blocks a second operation',
+    async (reason) => {
+      let resume!: () => void
+      const waiting = new Promise<void>((resolve) => {
+        resume = resolve
+      })
+      const written = vi.fn()
+      const f = savingFixture(async (validate) => {
+        await waiting
+        await validate()
+        written()
+        return true
+      })
+      const id = f.start(f.operation())
+      await vi.waitFor(() => expect(f.saveProjectCopy).toHaveBeenCalledOnce())
+      expect(
+        await f.request({
+          kind: 'prepare',
+          request: { runId: 'later', mode: 'edit', state: f.state() },
+        }),
+      ).toMatchObject({ ok: false, error: 'busy' })
+      if (reason === 'change') f.changed()
+      if (reason === 'cancel') f.listeners.get(WORKSPACE_EDITOR_CHANNELS.cancel)?.({}, id)
+      if (reason === 'dispose') f.stop()
+      if (reason === 'local-busy') f.busy()
+      resume()
+      if (reason !== 'dispose') expect(await f.result(id)).toMatchObject({ ok: false })
+      else await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(written).not.toHaveBeenCalled()
+      f.stop()
+    },
+  )
 })

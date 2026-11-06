@@ -2,6 +2,20 @@
 
 Elke editor kan het AI-paneel oproepen: selecteer iets, geef een instructie en zie het gestreamde resultaat.
 
+## Gedeelde vensterassistent
+
+Open het gedeelde paneel met **AI-assistent** in de tabbladbalk van het hoofdvenster. Het begint gesloten. Maak of kies een gesprek en selecteer het te bewerken document en de referentiebereiken uit HWP/HWPX-, DOCX/ODT- of Markdown/tekstdocumenten die in hetzelfde venster openstaan. Van tabblad wisselen of het paneel inklappen behoudt concepten en lopende taken. **Stoppen** beëindigt een taak. Typen of van gesprek wisselen verzendt geen verzoeken. De bestaande AI-panelen van de editors blijven beschikbaar.
+
+Met een Word-document als doel vullen Samenvatten, Verbeteren, Opmaak en Mindmap het invoerveld. Klik op Verzenden om de aanvraag uit te voeren; Verbeteren gebruikt de oorspronkelijk geselecteerde tekst als er een selectie is. Mindmaps blijven in hun gesprek en bieden inklapbare takken en PNG/SVG-downloads. Een klik op een onderwerp vult een vraag over hetzelfde doel in; kies na een doelwijziging eerst weer het oorspronkelijke document.
+
+Bij een Word-document verschijnt lange tekst tijdens het schrijven. Stoppen bij de schrijfvoortgang laat u de gedeeltelijke tekst behouden of verwijderen. Stoppen naast het invoerveld beëindigt de hele uitvoering en verwijdert het onvoltooide concept. De keuze blijft in het oorspronkelijke gesprek. Voltooide of behouden tekst kunt u terugdraaien met het ongedaan maken van deze uitvoering.
+
+In het hoofdvenster openen de AI-acties van Word via het lint, menu, F7 en contextmenu een nieuw gedeeld gesprek met het aangeklikte document en de selectie. Bestaande bevestigingen en directe uitvoering blijven behouden; de assistent openen of inklappen behoudt het huidige gesprek. Losgemaakte of zelfstandige vensters, een nog niet gereed zijnde host gebruiken het bestaande paneel. Dit blijft via de ingeklapte balk bereikbaar.
+
+In het hoofdvenster opent het toevoegen van een Word-selectiebewerking aan de wachtrij het gedeelde gesprek van dat document. Via de kaart kunt u passages opzoeken, instructies wijzigen, items verwijderen of het wissen van de wachtrij bevestigen. Verzenden draagt de bundel over aan een nieuw gedeeld gesprek; bij een geblokkeerde verbinding blijft het verzoek een concept. Een mislukte overdracht behoudt de wachtrij en gewijzigde documenten gebruiken geen oude posities. Losgemaakte en zelfstandige vensters behouden het bestaande paneel.
+
+In het hoofdvenster draagt een Word-vaardigheidssjabloonkopie het verzoek en de vaardigheidslabels één keer over aan een nieuw gedeeld gesprek. Bij een geblokkeerde verbinding blijft het verzoek daar als concept staan. Projectkopieën gebruiken de context van hun oorspronkelijke project en worden na een geslaagde uitvoering met een vrije naam in die map opgeslagen. Voorbeelden van lege sjablonen en niet-beschikbare gedeelde hosts gebruiken het bestaande editorpaneel.
+
 ## Openen en gebruiken
 
 - Het paneel heeft een verbonden AI nodig. Is er geen verbonden, dan toont het de verbindingskaarten in plaats van een foutmelding; zie [Abonnementsverbinding](help://subscription).

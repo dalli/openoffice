@@ -1,4 +1,4 @@
-import type { AgentStreamHandle, AgentTransport } from './types'
+import type { AgentStreamHandle, AgentTransport, AgentTokenUsage } from './types'
 
 /**
  * One tool-less streaming request whose reply body IS the artifact (a page, a
@@ -26,6 +26,7 @@ export interface StreamTextOptions {
    * settles, so the last call always carries everything that arrived.
    */
   onProgress?(text: string): void
+  onUsage?(usage: AgentTokenUsage): void
   /** minimum gap between two progress calls (default 120 ms; 0 = every delta) */
   progressIntervalMs?: number
 }
@@ -134,6 +135,7 @@ export function streamText(opts: StreamTextOptions): Promise<StreamTextOutcome> 
           scheduleProgress()
         },
         onToolCall: () => undefined,
+        ...(opts.onUsage ? { onUsage: opts.onUsage } : {}),
         onStopReason: (reason) => {
           stopReason = reason
         },

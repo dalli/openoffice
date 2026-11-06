@@ -5,7 +5,9 @@
  * or end the preview; a tab takes only its own hand-off. Every request is
  * checked again here.
  */
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import type { SkillHandoff } from '@genoffice/electron-utils/generate-handoff'
+import { routeTemplateHandoff } from './template-handoff'
 import {
   USER_SKILLS_CHANNELS as C,
   handoffTargetOf,
@@ -19,7 +21,10 @@ import type { TemplateTabs } from './template-tabs'
 const invalid: UserSkillsFail = { ok: false, reason: 'invalid' }
 const failed: UserSkillsFail = { ok: false, reason: 'failed' }
 
-export function registerTemplateTabsIpc(tabs: TemplateTabs): void {
+export function registerTemplateTabsIpc(
+  tabs: TemplateTabs,
+  route?: (event: IpcMainInvokeEvent, handoff: SkillHandoff) => Promise<boolean>,
+): void {
   ipcMain.handle(C.openTemplate, async (event, raw: unknown) => {
     const input = templateOpenInputOf(raw)
     if (!input) return invalid
@@ -56,7 +61,8 @@ export function registerTemplateTabsIpc(tabs: TemplateTabs): void {
 
   ipcMain.handle(C.takeHandoff, (event, target: unknown) => {
     const editor = handoffTargetOf(target)
-    return editor ? tabs.takeHandoff(editor, event.sender.id) : null
+    const handoff = editor ? tabs.takeHandoff(editor, event.sender.id) : null
+    return routeTemplateHandoff(handoff, route ? (value) => route(event, value) : undefined)
   })
 
   ipcMain.handle(C.focusTab, (_event, tabId: unknown) => {

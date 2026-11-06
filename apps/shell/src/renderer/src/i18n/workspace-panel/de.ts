@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const de = {
+  sendScope:
+    'Beim Senden werden der Inhalt des Bearbeitungsziels sowie die ausgewählten Referenzbereiche, Anhänge, Skills und der Projektkontext an die gewählte KI übertragen.',
+  attachmentLimit: 'Pro Nachricht können Sie bis zu 20 Dateien anhängen.',
+  polishPrompt:
+    'Überarbeite die festgehaltene Auswahl oder, falls kein Text ausgewählt ist, das gesamte Dokument, damit der Text klarer und flüssiger wird.',
   conversation: 'Unterhaltung',
   newConversation: 'Neue Unterhaltung',
   target: 'Bearbeitungsziel',

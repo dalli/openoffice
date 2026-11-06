@@ -14,6 +14,59 @@ function fixture(...args: Parameters<typeof makeWorkspaceHost>) {
 }
 
 describe('workspace model host through the real execution boundary', () => {
+  it('captures project context only after the gate admits, and binds the held request to its original conversation', async () => {
+    let held: WorkspacePendingSend | null = null
+    const captureProject = vi.fn(async () => ({ id: 'project', contextVersion: 'prepared' }))
+    let ready = false
+    const f = fixture({
+      admit: (request) => {
+        if (!ready) held = request
+        return ready
+      },
+      captureProject,
+      prepare: async (input) => ({ project: input.project, skills: [], dispose() {} }),
+    })
+    f.addEditor('A')
+    const p = await f.conversation('P', 'A')
+    const q = await f.conversation('Q', 'A')
+    expect(await p.send()).toBeNull()
+    expect(captureProject).not.toHaveBeenCalled()
+    f.host.conversations.select(q.id)
+    ready = true
+    const run = (await f.host.resume(held!))!
+    await until(() => f.requests.length === 1)
+    expect(captureProject).toHaveBeenCalledWith(expect.objectContaining({ conversationId: p.id }))
+    expect(f.host.conversations.state(p.id).runs[0]!.input.project).toEqual({
+      id: 'project',
+      contextVersion: 'prepared',
+    })
+    expect(f.requests[0]!.conversation).toBe(p.id)
+    expect(f.host.conversations.selectedId).toBe(q.id)
+    await f.host.cancel(run.run)
+  })
+
+  it('cancels a project admission before its async context read returns and discards the late capability', async () => {
+    const reading = deferred()
+    const captureProject = vi.fn(async () => {
+      await reading.promise
+      return { id: 'project', contextVersion: 'late' }
+    })
+    const discardProject = vi.fn(async () => {})
+    const f = fixture({ captureProject, discardProject })
+    f.addEditor('A')
+    const p = await f.conversation('P', 'A')
+    const submitted = p.send()
+    await until(() => captureProject.mock.calls.length === 1)
+    const run = f.host.conversations.state(p.id).runs[0]!.run
+    await f.host.cancel({ ...run, generation: run.generation + 1 })
+    expect(f.host.conversations.state(p.id).runs).toHaveLength(1)
+    await f.host.cancel(structuredClone(run))
+    reading.resolve()
+    expect(await submitted).toBeNull()
+    expect(f.requests).toEqual([])
+    expect(f.host.conversations.state(p.id).runs).toEqual([])
+    expect(discardProject).toHaveBeenCalledWith(p.id, { id: 'project', contextVersion: 'late' })
+  })
   it('refreshes only the original idle transcript and keeps its draft, runtime, selection and MCP choices', async () => {
     let records: ChatMessage[] = []
     const f = fixture({
@@ -391,5 +444,52 @@ describe('workspace model host through the real execution boundary', () => {
     expect(f.host.conversations.state(p.id).error).toBe('history-unwritable')
     expect(append).toHaveBeenCalledTimes(1)
     expect(f.requests).toHaveLength(1)
+  })
+})
+
+describe('workspace asynchronous checks before each model turn', () => {
+  it('cancels a pending check without starting the transport or accepting a late answer', async () => {
+    const wait = deferred()
+    const beforeTurn = vi.fn(() => wait.promise)
+    const f = makeWorkspaceHost({
+      prepare: async () => ({ project: null, skills: [], beforeTurn, dispose() {} }),
+    })
+    try {
+      f.addEditor('A')
+      const p = await f.conversation('P', 'A')
+      const sent = (await p.send())!
+      await until(() => beforeTurn.mock.calls.length === 1)
+      await f.host.cancel(sent.run)
+      wait.resolve()
+      await sent.done
+      expect(f.requests).toEqual([])
+      expect(f.host.busy()).toBe(false)
+    } finally {
+      f.dispose()
+    }
+  })
+  it('checks the next turn again and stops without sending when consent was withdrawn', async () => {
+    let allowed = true
+    const beforeTurn = vi.fn(async () => {
+      if (!allowed) throw new Error('Drive consent changed')
+    })
+    const f = makeWorkspaceHost({
+      prepare: async () => ({ project: null, skills: [], beforeTurn, dispose() {} }),
+    })
+    try {
+      f.addEditor('A')
+      const p = await f.conversation('P', 'A')
+      const sent = (await p.send())!
+      await until(() => f.requests.length === 1)
+      allowed = false
+      const cb = f.callbacks.get(p.id)![0]!
+      cb.onToolCall({ id: 'read', name: 'read', input: {} })
+      cb.onDone()
+      await sent.done
+      expect(beforeTurn).toHaveBeenCalledTimes(2)
+      expect(f.requests).toHaveLength(1)
+    } finally {
+      f.dispose()
+    }
   })
 })

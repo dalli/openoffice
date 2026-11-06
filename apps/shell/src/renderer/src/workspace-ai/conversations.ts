@@ -165,6 +165,21 @@ export class WorkspaceConversations<R extends WorkspaceConversationRuntime> {
     this.deps.changed?.()
   }
 
+  /** Main prepared this already submitted request; subsequent drafts keep their own project. */
+  bindProject(run: WorkspaceConversationRun, project: WorkspaceProjectBinding | null): void {
+    const session = this.session(run.conversationId)
+    const queued = session.state.runs.find(
+      (item) =>
+        item.status === 'queued' &&
+        item.run.controllerId === run.controllerId &&
+        item.run.runId === run.runId &&
+        item.run.generation === run.generation,
+    )
+    if (!queued) throw new Error('Conversation execution is not queued')
+    queued.input.project = structuredClone(project)
+    this.deps.changed?.()
+  }
+
   /** Apply the existing first-save/move service's result without replacing the conversation/loop. */
   rebindLegacy(id: string, ref: { projectId: string; chatId: string }): void {
     const session = this.session(id)

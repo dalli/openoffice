@@ -165,6 +165,7 @@ export {
   chipRefForSkill,
   handedRequestOf,
   isTemplateMissing,
+  previewEndedOf,
   skillTemplateBridge,
   templateChoice,
   templateDocumentOf,

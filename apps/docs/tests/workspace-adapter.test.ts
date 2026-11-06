@@ -91,6 +91,236 @@ afterEach(() => {
 })
 
 describe('DOCX workspace adapter on the real Tiptap editor', () => {
+  it('prepares a whole-document batch without borrowing the visible selected passage', async () => {
+    const instance = editor(['First passage', 'Keep middle', 'Last passage'])
+    const { adapter } = connect(instance)
+    select(instance, 'Last passage')
+    const before = instance.state.doc
+    const state = { ...(await adapter.capture()), selectionId: null }
+    const session = await adapter.prepare({ runId: 'whole-document-batch', mode: 'edit', state })
+    expect(session.context).toContain('First passage')
+    expect(session.context).toContain('No selection; cursor is in block')
+    expect(session.context).not.toContain('Current selection:')
+    expect(session.context).not.toContain('<sel>')
+    expect(session.context).toContain('No selection; cursor is in block')
+    for (const index of [2, 0]) {
+      const result = await session.execute(
+        tool('replace_blocks', {
+          startBlockIndex: index,
+          endBlockIndex: index,
+          html: `<p>Edited ${index}</p>`,
+        }),
+      )
+      expect(result.result.isError).not.toBe(true)
+    }
+    expect(instance.state.doc.textContent).toBe('Edited 0Keep middleEdited 2')
+    const rollbackId = session.rollbackId!
+    const after = { ...(await adapter.capture()), selectionId: null }
+    session.release()
+    await adapter.rollback!(rollbackId, after)
+    expect(instance.state.doc.eq(before)).toBe(true)
+  })
+
+  it('keeps a document-wide request unselected when its final block is an image', async () => {
+    const instance = editor(['Text before image'])
+    instance.commands.insertContentAt(instance.state.doc.content.size, {
+      type: 'docProtected',
+      attrs: { docxIndex: null, blockType: 'image', label: 'Image' },
+    })
+    const { adapter } = connect(instance)
+    const state = { ...(await adapter.capture()), selectionId: null }
+    const session = await adapter.prepare({ runId: 'whole-document-image', mode: 'edit', state })
+    expect(session.context).not.toContain('<sel>')
+    const result = await session.execute(tool('replace_selection', { html: 'Wrong scope' }))
+    expect(result.result.isError).toBe(true)
+    expect(instance.state.doc.textContent).toContain('Text before image')
+    session.release()
+  })
+  it('streams a long-form draft through the existing writer and restores the entire run', async () => {
+    const instance = editor()
+    const before = instance.getJSON()
+    const { adapter } = connect(instance)
+    const state = await adapter.capture()
+    const session = await prepare(adapter)
+    const call = tool('write_document', { plan: 'A complete chapter', replaceDocument: true })
+    const executing = session.execute(call)
+    await adapter.updateWriter!(call.id, { kind: 'ready' })
+    await expect(
+      adapter.updateWriter!('another-call', { kind: 'progress', text: '<p>wrong</p>' }),
+    ).rejects.toMatchObject({ kind: 'invalid-call' })
+    await adapter.updateWriter!(call.id, {
+      kind: 'progress',
+      text: '<h1>Live chapter</h1><p>Live draft</p>',
+    })
+    await vi.waitFor(() => expect(instance.state.doc.textContent).toContain('Live draft'))
+    expect((await adapter.capture()).revision).toBe(state.revision)
+    await adapter.updateWriter!(call.id, {
+      kind: 'result',
+      ok: true,
+      text: '<h1>Complete chapter</h1><p>Final prose</p>',
+    })
+    const result = await executing
+    expect(result.result.mutated).toBe(true)
+    expect(instance.state.doc.textContent).toBe('Complete chapterFinal prose')
+    expect(result.state.revision).not.toBe(state.revision)
+    session.release()
+    await adapter.rollback!(session.rollbackId!, result.state)
+    expect(instance.getJSON()).toEqual(before)
+    await expect(
+      adapter.updateWriter!(call.id, { kind: 'result', ok: true, text: '<p>Late</p>' }),
+    ).rejects.toMatchObject({ kind: 'invalid-call' })
+  })
+
+  it.each(['discard', 'cancel', 'manual', 'read-only'] as const)(
+    'does not land a long-form draft after %s',
+    async (action) => {
+      const instance = editor()
+      const before = instance.state.doc.textContent
+      const { adapter } = connect(instance)
+      const session = await prepare(adapter)
+      const abort = new AbortController()
+      const call = tool('write_document', { plan: 'New chapter', afterBlockIndex: 1 })
+      const executing = session.execute(call, abort.signal)
+      const settled = executing.catch((error: unknown) => error)
+      await adapter.updateWriter!(call.id, { kind: 'ready' })
+      await adapter.updateWriter!(call.id, { kind: 'progress', text: '<p>Temporary draft</p>' })
+      await vi.waitFor(() => expect(instance.state.doc.textContent).toContain('Temporary draft'))
+      if (action === 'cancel') abort.abort()
+      else {
+        if (action === 'manual') instance.commands.insertContentAt(1, 'Manual edit ')
+        if (action === 'read-only') instance.setEditable(false)
+        await adapter.updateWriter!(call.id, {
+          kind: 'result',
+          ok: action !== 'discard',
+          text: '<p>Final prose</p>',
+        })
+      }
+      const result = await settled
+      if (action === 'discard')
+        expect(result).toMatchObject({ result: { isError: true, mutated: false } })
+      else
+        expect(result).toMatchObject({
+          kind:
+            action === 'cancel'
+              ? 'cancelled'
+              : action === 'read-only'
+                ? 'read-only'
+                : 'stale-document',
+        })
+      expect(instance.state.doc.textContent).toBe(
+        (action === 'manual' ? 'Manual edit ' : '') + before,
+      )
+    },
+  )
+
+  it('lands an explicitly adopted partial as one ordinary edit', async () => {
+    const instance = editor()
+    const { adapter } = connect(instance)
+    const session = await prepare(adapter)
+    const call = tool('write_document', { plan: 'New chapter', afterBlockIndex: 1 })
+    const executing = session.execute(call)
+    await adapter.updateWriter!(call.id, { kind: 'ready' })
+    await adapter.updateWriter!(call.id, {
+      kind: 'result',
+      ok: true,
+      truncated: true,
+      text: '<p>Kept partial</p>',
+    })
+    const result = await executing
+    expect(result.result.output).toContain('INCOMPLETE')
+    expect(instance.state.doc.textContent).toContain('Kept partial')
+    expect(session.rollbackId).toBeTruthy()
+  })
+  it('renders a bounded mind map through the original executor without changing the document or capturing undo', async () => {
+    const instance = editor()
+    const before = instance.getJSON()
+    const beforeFirstWrite = vi.fn()
+    const { adapter } = connect(instance, { beforeFirstWrite })
+    const state = await adapter.capture()
+    const session = await prepare(adapter)
+    const input = {
+      root: { label: 'Fixture', block: 0, children: [{ label: 'Second', block: 1 }] },
+    }
+    const original = createDocsSkill(
+      () => instance,
+      () => NUM_IDS,
+    )
+    const expected = await original.executeTool(tool('generate_mindmap', input))
+    const answer = await session.execute(tool('generate_mindmap', input))
+    expect(answer.result.display).toEqual(expected.display)
+    expect(answer.result.mutated).toBe(false)
+    expect(answer.result.output).not.toContain('jump')
+    expect(answer.state.revision).toBe(state.revision)
+    expect(session.rollbackId).toBeNull()
+    expect(beforeFirstWrite).not.toHaveBeenCalled()
+    expect(instance.getJSON()).toEqual(before)
+  })
+  it('reads only template metadata until asked, blocks hidden as-is copies and rejects changes during serialization', async () => {
+    const instance = editor()
+    const bytes = vi.fn(async () => new Uint8Array([1, 2, 3]))
+    const source = { fileName: 'current.docx', title: 'current', bytes, redacted: () => false }
+    const { adapter } = connect(instance, { getTemplateDocument: () => source })
+    const state = await adapter.capture()
+    expect(await adapter.template!(state, 'info')).toMatchObject({ bytes: null, redacted: false })
+    expect(bytes).not.toHaveBeenCalled()
+    instance.commands.setTextSelection({ from: 1, to: 6 })
+    instance.commands.setMark('redaction', { label: 'private' })
+    const marked = await adapter.capture()
+    await expect(adapter.template!(marked, 'as-is')).rejects.toMatchObject({
+      kind: 'unsafe-content',
+    })
+    expect(bytes).not.toHaveBeenCalled()
+    expect(await adapter.template!(marked, 'preview')).toMatchObject({
+      redacted: true,
+      bytes: new Uint8Array([1, 2, 3]),
+    })
+    bytes.mockImplementationOnce(async () => {
+      instance.commands.insertContent('manual edit')
+      return new Uint8Array([4])
+    })
+    await expect(adapter.template!(await adapter.capture(), 'preview')).rejects.toMatchObject({
+      kind: 'stale-document',
+    })
+  })
+  it('requires reselection when the pinned range was deleted and restores it on whole-run undo', async () => {
+    const instance = editor()
+    const { adapter } = connect(instance)
+    select(instance, 'First')
+    const pinned = await adapter.capture()
+    const session = await adapter.prepare({ runId: 'delete', mode: 'edit', state: pinned })
+    await session.execute(
+      tool('apply_ops', { ops: [{ op: 'deleteBlocks', target: { blockIndexes: [0] } }] }),
+    )
+    session.release()
+    await expect(adapter.refresh(pinned)).rejects.toMatchObject({ kind: 'stale-selection' })
+    await adapter.rollback!(session.rollbackId!, session.state)
+    const restored = await adapter.refresh(pinned)
+    expect((await adapter.read(restored, { scope: 'selection' })).text).toBe('First')
+  })
+
+  it('continues the pinned range after editing and rollback without following a later selection', async () => {
+    const instance = editor()
+    const { adapter } = connect(instance)
+    select(instance, 'First')
+    const pinned = await adapter.capture()
+    const first = await adapter.prepare({ runId: 'first', mode: 'edit', state: pinned })
+    select(instance, 'Second')
+    await first.execute(tool('replace_selection', { html: 'Changed' }))
+    first.release()
+    const refreshed = await adapter.refresh(pinned)
+    expect(refreshed.selectionId).toBe(pinned.selectionId)
+    expect((await adapter.read(refreshed, { scope: 'selection' })).text).toBe('Changed')
+    await adapter.rollback!(first.rollbackId!, first.state)
+    const restored = await adapter.refresh(refreshed)
+    expect((await adapter.read(restored, { scope: 'selection' })).text).toBe('First')
+    const second = await adapter.prepare({ runId: 'second', mode: 'edit', state: restored })
+    await second.execute(tool('replace_selection', { html: 'Continued' }))
+    second.release()
+    expect(instance.state.doc.textContent).toContain('Continued paragraphSecond paragraph')
+    instance.view.dispatch(instance.state.tr.insertText('manual ', 1))
+    await expect(adapter.refresh(restored)).rejects.toMatchObject({ kind: 'stale-selection' })
+  })
+
   it('restores a whole workspace run through the original rollback path and refuses later manual edits', async () => {
     const instance = editor()
     const before = instance.getJSON()
@@ -402,6 +632,7 @@ describe('DOCX workspace adapter on the real Tiptap editor', () => {
     const instance = editor()
     const session = await prepare(connect(instance).adapter, 'reference')
     expect(session.tools.map((entry) => entry.name).sort()).toEqual([
+      'generate_mindmap',
       'get_document_context',
       'read_blocks',
       'read_revisions',
@@ -419,7 +650,9 @@ describe('DOCX workspace adapter on the real Tiptap editor', () => {
     const readOnly = await prepare(adapter)
     expect(
       readOnly.tools.every((entry) =>
-        ['get_document_context', 'read_blocks', 'read_revisions'].includes(entry.name),
+        ['generate_mindmap', 'get_document_context', 'read_blocks', 'read_revisions'].includes(
+          entry.name,
+        ),
       ),
     ).toBe(true)
     readOnly.release()
@@ -442,7 +675,6 @@ describe('DOCX workspace adapter on the real Tiptap editor', () => {
       'generate_image',
       'analyze_media',
       'create_document',
-      'write_document',
       'save_document',
       'read_comments',
       'set_header_footer',
@@ -564,7 +796,8 @@ describe('DOCX workspace adapter on the real Tiptap editor', () => {
       type: 'doc',
       content: blocksToPmDoc(parsed.blocks).content as never[],
     })
-    const session = await prepare(connect(instance).adapter)
+    const { adapter } = connect(instance)
+    const session = await prepare(adapter)
     expect(session.systemPrompt).toContain('ODT')
     for (const name of ['insert_chart', 'edit_chart', 'accept_changes', 'reject_changes']) {
       expect(session.tools.some((entry) => entry.name === name)).toBe(false)
@@ -581,6 +814,21 @@ describe('DOCX workspace adapter on the real Tiptap editor', () => {
     expect(actual.result).toEqual(expected)
     expect(actual.result.isError).toBe(true)
     expect(actual.result.output).toContain('not available in this ODT document')
+    expect(instance.getJSON()).toEqual(before)
+    expect(session.tools.map((entry) => entry.name)).toContain('write_document')
+    const writing = tool('write_document', { plan: 'An ODT paragraph', afterBlockIndex: 0 })
+    const pending = session.execute(writing)
+    await adapter.updateWriter!(writing.id, { kind: 'ready' })
+    await adapter.updateWriter!(writing.id, {
+      kind: 'result',
+      ok: true,
+      text: '<p>ODT written paragraph</p>',
+    })
+    const result = await pending
+    expect(result.result.mutated).toBe(true)
+    expect(instance.state.doc.textContent).toContain('ODT written paragraph')
+    session.release()
+    await adapter.rollback!(session.rollbackId!, result.state)
     expect(instance.getJSON()).toEqual(before)
   })
 

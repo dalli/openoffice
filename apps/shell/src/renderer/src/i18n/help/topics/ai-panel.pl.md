@@ -2,6 +2,20 @@
 
 Każdy edytor może przywołać panel AI: zaznacz coś, wydaj polecenie i obserwuj wynik przesyłany strumieniowo.
 
+## Wspólny asystent okna
+
+Otwórz wspólny panel przyciskiem **Asystent AI** na pasku kart głównego okna. Początkowo jest zwinięty. Utwórz lub wybierz rozmowę, a następnie dokument do edycji i zakresy odniesienia spośród dokumentów HWP/HWPX, DOCX/ODT lub Markdown/tekst otwartych w tym samym oknie. Zmiana karty i zwinięcie panelu zachowują szkice oraz trwające zadania. **Zatrzymaj** kończy zadanie. Pisanie ani zmiana rozmowy nie wysyłają żądań. Dotychczasowe panele AI edytorów pozostają dostępne.
+
+Gdy celem jest dokument Word, przyciski Podsumuj, Popraw, Formatuj i Mapa myśli wypełniają pole tekstowe. Kliknij Wyślij, aby uruchomić prośbę; poprawianie używa pierwotnie zaznaczonego tekstu, jeśli jest zaznaczenie. Mapy pozostają w swojej rozmowie i pozwalają zwijać gałęzie oraz pobierać PNG/SVG. Kliknięcie tematu przygotowuje pytanie o ten sam cel; po zmianie celu najpierw ponownie wybierz pierwotny dokument.
+
+Gdy celem jest dokument Word, długi tekst pojawia się w trakcie pisania. Zatrzymaj przy postępie pisania pozwala zachować lub odrzucić część tekstu. Zatrzymaj obok pola wprowadzania kończy całe wykonanie i usuwa niedokończony szkic. Wybór pozostaje w pierwotnej rozmowie. Ukończony lub zachowany tekst można cofnąć poleceniem cofnięcia tego wykonania.
+
+W głównym oknie działania AI programu Word ze wstążki, menu, F7 i menu kontekstowego otwierają nową wspólną rozmowę z klikniętym dokumentem i zaznaczeniem. Dotychczasowe potwierdzenia i natychmiastowe wykonanie pozostają; otwieranie lub zwijanie asystenta zachowuje obecną rozmowę. Odłączone lub samodzielne okna, niegotowy host korzystają z dotychczasowego panelu, dostępnego również przez zwinięty pasek.
+
+W głównym oknie dodanie edycji zaznaczenia Word do kolejki otwiera wspólną rozmowę tego dokumentu. Karta pozwala odnaleźć fragmenty, zmieniać instrukcje, usuwać pozycje lub potwierdzić wyczyszczenie kolejki. Wysłanie przekazuje pakiet do nowej wspólnej rozmowy; przy zablokowanym połączeniu pozostaje on szkicem. Nieudane przekazanie zachowuje kolejkę, a zmieniony dokument nie używa starych pozycji. Odłączone i samodzielne okna zachowują dotychczasowy panel.
+
+W głównym oknie kopia szablonu umiejętności Word jednorazowo przekazuje żądanie i etykiety umiejętności do nowej wspólnej rozmowy. Przy zablokowanym połączeniu żądanie pozostaje tam jako szkic. Kopie w projektach używają kontekstu pierwotnego projektu i po pomyślnym zakończeniu są zapisywane w jego folderze pod wolną nazwą. Podglądy pustych szablonów i niedostępne wspólne hosty korzystają z dotychczasowego panelu edytora.
+
 ## Otwieranie i używanie
 
 - Panel wymaga połączonego AI. Gdy żadne nie jest połączone, zamiast błędu pokazuje karty połączenia; zobacz [Połączenie z subskrypcją](help://subscription).

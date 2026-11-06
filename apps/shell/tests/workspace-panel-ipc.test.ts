@@ -1,5 +1,6 @@
+import { DOCS_WORKSPACE_AI_ENTRY as ENTRY } from '../../docs/src/shared/workspace-ai-entry'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
@@ -39,6 +40,9 @@ import {
 } from '../src/shared/workspace-layout'
 import type { TabManager } from '../src/main/tab-manager'
 import { deferred, makeWorkspaceHost, until } from './helpers/workspace-host-fixture'
+import type { ProjectFolderServices } from '../src/main/projects/project-ipc'
+import type { WorkspaceAttachmentServices } from '../src/main/workspace-ai/attachments'
+import type { ProjectContextBundle } from '@genoffice/project-store'
 
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -51,6 +55,7 @@ function fixture() {
   const f = makeWorkspaceHost()
   const a = f.addEditor('A')
   const b = f.addEditor('B')
+  const aRequestOriginal = a.client.request.bind(a.client)
   const aRequest = vi.spyOn(a.client, 'request')
   const bRequest = vi.spyOn(b.client, 'request')
   const editors = new Map([
@@ -114,8 +119,42 @@ function fixture() {
       { id: 'unsupported', kind: 'pdf', title: 'PDF', available: false },
     ],
     splitState: () => null,
+    tabIdForWebContents: vi.fn((_id: number): string | undefined => undefined),
+    webContentsForTab: vi.fn((_id: string): unknown => undefined),
   }
   const projects = { listProjects: vi.fn(async (): Promise<ProjectListItem[]> => []) }
+  const context: ProjectContextBundle = {
+    projectId: 'project-one',
+    name: 'Project one',
+    trust: 'use',
+    instructions: { text: 'PROJECT INSTRUCTIONS', sources: ['agents'] },
+    memory: null,
+    files: [],
+    filesOmitted: 0,
+    canRemember: true,
+    notices: [],
+  }
+  const projectRuntime = {
+    guide: {
+      ...projects,
+      readContext: vi.fn(async () => ({ status: 'ok', context: structuredClone(context) })),
+      aiVisibility: vi.fn(async () => ({ root: '/project-one', ruleKey: 'visible' })),
+      editMemory: vi.fn(async () => ({ status: 'ok', change: { op: 'add', text: 'memory' } })),
+    },
+    tools: {
+      openScope: vi.fn(async () => 'private-scope'),
+      closeScope: vi.fn(),
+      listFiles: vi.fn(async () => ({ files: [], total: 0, offset: 0 })),
+      search: vi.fn(),
+      read: vi.fn(async () => ({
+        status: 'ok',
+        text: 'PROJECT MATERIAL',
+        totalChars: 16,
+        offset: 0,
+      })),
+    },
+    scopes: { projectOf: vi.fn(() => context.projectId) },
+  }
   const chats = {
     listChats: vi.fn(async (): Promise<ProjectChatListItem[]> => []),
     openChat: vi.fn(),
@@ -144,14 +183,54 @@ function fixture() {
     sender: contents,
     senderFrame: contents.mainFrame,
   } as unknown as IpcMainInvokeEvent
+  const attachments: WorkspaceAttachmentServices = {
+    pick: vi.fn(async () => null),
+    add: vi.fn((paths) => ({
+      accepted: paths.map((path) => ({
+        path,
+        name: path.split('/').at(-1)!,
+        ext: path.split('.').at(-1)!,
+        sizeBytes: statSync(path).size,
+      })),
+      rejected: [],
+    })),
+    read: vi.fn(async (path, offset, max) => {
+      const text = readFileSync(path, 'utf8')
+      return { ok: true, offset, totalChars: text.length, text: text.slice(offset, offset + max) }
+    }),
+    image: vi.fn(() => ({ ok: true, base64: 'cGl4ZWw=', mime: 'image/png' })),
+  }
+  const drive = {
+    status: vi.fn(() => ({ connected: true, enabled: true, allowed: true })),
+    search: vi.fn(async () => ({
+      ok: true,
+      hits: [{ id: 'report', name: 'Report', type: 'document', modified: '' }],
+    })),
+    read: vi.fn(async () => ({
+      ok: true,
+      page: { name: 'Report', text: 'PRIVATE DRIVE BODY', totalChars: 18, offset: 0 },
+    })),
+    pick: vi.fn(async () => ({ ok: false as const, reason: 'cancelled' as const })),
+    isDrivePath: vi.fn(() => false),
+  }
+  const openTemplate = vi.fn(async () => ({ ok: true, tabId: 'copy' }))
+  const stream = vi.fn(async (_request: unknown, _signal: AbortSignal, _send: unknown) => {})
   const service = registerWorkspacePanelIpc(ipc, (event) =>
     event.sender === (contents as unknown)
       ? {
           window: win as unknown as BrowserWindow,
           tabs: tabs as unknown as TabManager,
           history,
+          openTemplate,
+          attachments,
+          drive,
+          stream,
           sources,
           sender,
+          projects: projectRuntime as unknown as Pick<
+            ProjectFolderServices,
+            'guide' | 'tools' | 'scopes'
+          >,
         }
       : null,
   )
@@ -194,12 +273,14 @@ function fixture() {
     a,
     b,
     aRequest,
+    aRequestOriginal,
     bRequest,
     contents,
     win,
     tabs,
     api,
     service,
+    openTemplate,
     raw,
     event,
     handlers,
@@ -208,6 +289,11 @@ function fixture() {
     memoryApi,
     sources,
     projects,
+    projectRuntime,
+    attachments,
+    drive,
+    stream,
+    context,
     chats,
     sender,
     layoutListeners,
@@ -240,6 +326,545 @@ async function open(f: ReturnType<typeof fixture>, client: WorkspacePanelClient)
 }
 
 describe('private workspace shell service and cloned preload bridge', () => {
+  it('transfers main-owned template requests only to an acknowledged live source view', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const from = {
+      sender: { id: 21, mainFrame: {}, isDestroyed: () => false },
+      senderFrame: {},
+    } as unknown as IpcMainInvokeEvent
+    Object.assign(from, { senderFrame: from.sender.mainFrame })
+    const handoff = {
+      id: 'template-one',
+      mode: 'skill' as const,
+      target: 'docs' as const,
+      text: 'Fill the copy',
+      chips: [{ id: 'app:one', source: 'app', title: 'One' }],
+      createdAt: 1,
+    }
+    f.tabs.tabIdForWebContents.mockReturnValue('A')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    expect(await f.service.offerTemplate(from, handoff)).toBe(false)
+    await client.entriesReady(true)
+    expect(
+      await f.service.offerTemplate({ ...from, senderFrame: {} } as IpcMainInvokeEvent, handoff),
+    ).toBe(false)
+    const entries: Extract<
+      import('../src/shared/workspace-panel-api').WorkspacePanelEvent,
+      { kind: 'entry' }
+    >[] = []
+    client.subscribe((event) => {
+      if (event.kind === 'entry') entries.push(event)
+    })
+    const offered = f.service.offerTemplate(from, handoff)
+    await until(() => entries.length === 1)
+    expect(entries[0]!.entry).toEqual({
+      kind: 'template-handoff',
+      id: handoff.id,
+      text: handoff.text,
+      chips: handoff.chips,
+    })
+    expect(await client.acknowledgeEntry(entries[0]!.entryId!, true)).toBe(true)
+    expect(await offered).toBe(true)
+    expect(await client.acknowledgeEntry(entries[0]!.entryId!, true)).toBe(false)
+    const changed = f.service.offerTemplate(from, { ...handoff, id: 'changed' })
+    await until(() => entries.length === 2)
+    f.a.manual()
+    expect(await client.acknowledgeEntry(entries[1]!.entryId!, true)).toBe(false)
+    expect(await changed).toBe(false)
+    const closed = f.service.offerTemplate(from, { ...handoff, id: 'closed' })
+    await until(() => entries.length === 3)
+    await client.entriesReady(false)
+    expect(await closed).toBe(false)
+    expect(f.stream).not.toHaveBeenCalled()
+    await client.dispose()
+  })
+
+  it('expires an unacknowledged batch and rejects a late acceptance without starting a model', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const from = { sender: { id: 21, mainFrame: {}, isDestroyed: () => false }, senderFrame: {} }
+    from.senderFrame = from.sender.mainFrame
+    f.tabs.tabIdForWebContents.mockReturnValue('A')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    await client.entriesReady(true)
+    let entryId = ''
+    client.subscribe((event) => {
+      if (event.kind === 'entry') entryId = event.entryId!
+    })
+    vi.useFakeTimers()
+    try {
+      const result = f.handlers.get(ENTRY)!(from, {
+        kind: 'edit-batch',
+        text: 'BATCH',
+        displayText: 'Two edits',
+        documentId: 'A',
+        revision: '1',
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(entryId).not.toBe('')
+      let answered = false
+      void result.then(() => {
+        answered = true
+      })
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(answered).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await result).toBe('rejected')
+      expect(await client.acknowledgeEntry(entryId, true)).toBe(false)
+      expect(f.stream).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+      await client.dispose()
+    }
+  })
+  it('acknowledges a batch only after installation in this live host and rejects stale or duplicate acknowledgements', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const from = { sender: { id: 21, mainFrame: {}, isDestroyed: () => false }, senderFrame: {} }
+    from.senderFrame = from.sender.mainFrame
+    f.tabs.tabIdForWebContents.mockReturnValue('A')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    await client.entriesReady(true)
+    const entries: Extract<
+      import('../src/shared/workspace-panel-api').WorkspacePanelEvent,
+      { kind: 'entry' }
+    >[] = []
+    client.subscribe((event) => {
+      if (event.kind === 'entry') entries.push(event)
+    })
+    const entry = {
+      kind: 'edit-batch',
+      text: 'BATCH',
+      displayText: 'Two edits',
+      documentId: 'A',
+      revision: '1',
+    }
+    const result = f.handlers.get(ENTRY)!(from, entry)
+    await until(() => entries.length === 1)
+    let answered = false
+    void result.then(() => {
+      answered = true
+    })
+    expect(answered).toBe(false)
+    const id = entries[0]!.entryId!
+    expect(entries[0]!.capture.binding.selection).toBeNull()
+    expect(await client.acknowledgeEntry('unknown', true)).toBe(false)
+    expect(await client.acknowledgeEntry(id, true)).toBe(true)
+    expect(await result).toBe(true)
+    expect(await client.acknowledgeEntry(id, true)).toBe(false)
+    expect(f.stream).not.toHaveBeenCalled()
+
+    const later = f.handlers.get(ENTRY)!(from, entry)
+    await until(() => entries.length === 2)
+    f.tabs.webContentsForTab.mockReturnValue({ ...from.sender })
+    expect(await client.acknowledgeEntry(entries[1]!.entryId!, true)).toBe(false)
+    expect(await later).toBe('rejected')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    const changed = f.handlers.get(ENTRY)!(from, entry)
+    await until(() => entries.length === 3)
+    f.a.manual()
+    expect(await client.acknowledgeEntry(entries[2]!.entryId!, true)).toBe(false)
+    expect(await changed).toBe('rejected')
+    expect(await f.handlers.get(ENTRY)!(from, entry)).toBe('rejected')
+    const latest = { ...entry, revision: '2' }
+    const closing = f.handlers.get(ENTRY)!(from, latest)
+    await until(() => entries.length === 4)
+    await client.entriesReady(false)
+    expect(await closing).toBe('rejected')
+    expect(await f.handlers.get(ENTRY)!(from, { ...entry, revision: '0' })).toBe(false)
+    await client.dispose()
+  })
+  it('accepts editor navigation only for a ready host and its actual live Word view/frame', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const from = { sender: { id: 21, mainFrame: {}, isDestroyed: () => false }, senderFrame: {} }
+    from.senderFrame = from.sender.mainFrame
+    f.tabs.tabIdForWebContents.mockImplementation((id) => (id === 21 ? 'A' : undefined))
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    const route = (entry: unknown, event: unknown = from) => f.handlers.get(ENTRY)!(event, entry)
+    const events: import('../src/shared/workspace-panel-api').WorkspacePanelEvent[] = []
+    client.subscribe((event) => events.push(event))
+    expect(await route({ kind: 'open' })).toBe(false)
+    await client.entriesReady(true)
+    expect(await route({ kind: 'preset', text: 'TEST_ENTRY', autoRun: true })).toBe(true)
+    expect(events).toEqual([
+      expect.objectContaining({
+        kind: 'entry',
+        entry: { kind: 'preset', text: 'TEST_ENTRY', autoRun: true },
+        capture: expect.objectContaining({
+          binding: expect.objectContaining({
+            document: expect.objectContaining({ tabId: 'A', kind: 'docs' }),
+          }),
+        }),
+      }),
+    ])
+    expect(f.aRequest.mock.calls.some(([op]) => op.kind === 'prepare' || op.kind === 'read')).toBe(
+      false,
+    )
+    expect(f.stream).not.toHaveBeenCalled()
+    expect(await route({ kind: 'open', tabId: 'B' })).toBe(false)
+    expect(await route({ kind: 'open' }, { ...from, senderFrame: {} })).toBe(false)
+    f.tabs.webContentsForTab.mockReturnValue({ ...from.sender })
+    expect(await route({ kind: 'open' })).toBe(false)
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    await client.entriesReady(false)
+    expect(await route({ kind: 'toggle' })).toBe(false)
+    await client.dispose()
+    expect(await route({ kind: 'open' })).toBe(false)
+    expect(events.filter((event) => event.kind === 'entry')).toHaveLength(1)
+  })
+
+  it('does not deliver an entry when the host closes during the source capture', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const from = { sender: { id: 21, mainFrame: {}, isDestroyed: () => false }, senderFrame: {} }
+    from.senderFrame = from.sender.mainFrame
+    f.tabs.tabIdForWebContents.mockReturnValue('A')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    await client.entriesReady(true)
+    const pending = deferred()
+    const request = f.aRequest.getMockImplementation()!
+    f.aRequest.mockImplementation(async (op, signal) => {
+      if (op.kind === 'capture') await pending.promise
+      return request(op, signal)
+    })
+    const result = f.handlers.get(ENTRY)!(from, { kind: 'open' })
+    await client.dispose()
+    pending.resolve()
+    expect(await result).toBe(false)
+  })
+
+  it('restricts model turns to a live run, relays structured chunks, and awaits cancellation', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const { run: bound } = await open(f, client)
+    const request = {
+      requestId: 'turn-one',
+      sessionId: 'model-session',
+      system: '',
+      messages: [],
+      tools: [],
+    }
+    await expect(client.stream(bound, request)).rejects.toThrow()
+    const run = (await client.startNext())!
+    const events: unknown[] = []
+    const off = client.subscribe((event) => {
+      if (event.kind === 'stream') events.push(event.chunk)
+    })
+    for (const bad of [
+      { ...run.binding, conversationId: 'wrong' },
+      { ...run.binding, owner: { ...run.binding.owner, panelGeneration: 9 } },
+    ])
+      await expect(client.stream(bad, request)).rejects.toThrow()
+    expect(f.stream).not.toHaveBeenCalled()
+    const stopped = deferred()
+    let signal: AbortSignal | undefined
+    f.stream.mockImplementation(async (_request, abort, send) => {
+      signal = abort
+      ;(send as (chunk: unknown) => void)({ requestId: request.requestId, type: 'input-truncated' })
+      await stopped.promise
+      ;(send as (chunk: unknown) => void)({ requestId: request.requestId, type: 'done' })
+    })
+    const sending = client.stream(run.binding, request)
+    await until(() => f.stream.mock.calls.length === 1)
+    const cancelled = vi.fn()
+    const cancelling = client.cancel(run.binding).then(cancelled)
+    await until(() => signal?.aborted === true)
+    expect(cancelled).not.toHaveBeenCalled()
+    stopped.resolve()
+    await Promise.all([sending, cancelling])
+    expect(cancelled).toHaveBeenCalledOnce()
+    expect(events).toEqual([
+      { requestId: request.requestId, type: 'input-truncated' },
+      { requestId: request.requestId, type: 'done' },
+    ])
+    await expect(client.stream(run.binding, { ...request, requestId: 'late' })).rejects.toThrow()
+    off()
+    await client.dispose()
+  })
+
+  it('rechecks Drive permission at the model entry and rejects malformed turn requests', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    await open(f, client)
+    const run = (await client.startNext())!
+    const request = {
+      requestId: 'turn-one',
+      sessionId: 'session-one',
+      system: '',
+      messages: [],
+      tools: [],
+    }
+    f.drive.isDrivePath.mockReturnValue(true)
+    f.drive.status.mockReturnValue({ connected: true, enabled: false, allowed: false })
+    await expect(client.stream(run.binding, request)).rejects.toThrow()
+    for (const changed of [
+      { messages: [{ role: 'unexpected' }] },
+      { tools: [{ name: 'invalid tool' }] },
+      { requestId: '' },
+    ]) {
+      expect(
+        await f.raw(
+          { kind: 'stream', run: run.binding, request: { ...request, ...changed } },
+          client.session,
+        ),
+      ).toMatchObject({ ok: false })
+    }
+    expect(f.stream).not.toHaveBeenCalled()
+    await client.cancel(run.binding)
+    await client.dispose()
+  })
+
+  it('binds picked files to the queued conversation and rejects malformed, ungranted, retired and foreign reads', async () => {
+    const f = fixture()
+    const path = join(f.root, 'material.md')
+    writeFileSync(path, 'PRIVATE ATTACHMENT TEXT')
+    const client = await WorkspacePanelClient.connect(f.api)
+    await expect(client.addAttachments('unopened', [path])).rejects.toThrow()
+    const source = await client.create()
+    await client.load(source.origin)
+    const id = workspaceConversationKey(source.origin)
+    const files = (await client.addAttachments(id, [path]))!.accepted
+    const target = await client.capture('A')
+    const request = {
+      conversationId: id,
+      runId: 'attachment-run',
+      targetId: target.id,
+      referenceIds: [],
+      project: null,
+    }
+    await expect(client.enqueue(request, [{ ...files[0]!, path: '/ungranted' }])).rejects.toThrow()
+    const bound = await client.enqueue({ ...request, runId: 'granted-run' }, files)
+    await expect(client.attachmentRead(bound, 0, 0)).rejects.toThrow()
+    const run = (await client.startNext())!
+    expect(await client.attachmentList(run.binding)).toEqual(files)
+    expect((await client.attachmentRead(run.binding, 0, 0)).text).toBe('PRIVATE ATTACHMENT TEXT')
+    for (const bad of [
+      { ...run.binding, conversationId: 'other' },
+      { ...run.binding, owner: { ...run.binding.owner, panelGeneration: 99 } },
+    ])
+      await expect(client.attachmentRead(bad, 0, 0)).rejects.toThrow()
+    await expect(client.attachmentRead(run.binding, -1, 0)).rejects.toThrow()
+    await expect(client.attachmentRead(run.binding, 0, 0.5)).rejects.toThrow()
+    await expect(client.attachmentImage(run.binding, 0)).rejects.toThrow()
+    await client.cancel(run.binding)
+    await expect(client.attachmentRead(run.binding, 0, 0)).rejects.toThrow()
+    expect(f.attachments.read).toHaveBeenCalledTimes(1)
+    await client.dispose()
+  })
+
+  it('prepares only the sent attachments and excludes their tool text from saved history', async () => {
+    const f = fixture()
+    const path = join(f.root, 'material.md')
+    writeFileSync(path, 'ATTACHMENT BODY')
+    const requests: AgentStreamRequest[] = []
+    const callbacks: AgentStreamCallbacks[] = []
+    const connected = await connectWorkspacePanel(f.api, {
+      gate: () => ({ kind: 'run' }),
+      admit: () => true,
+      prepare: async () => ({ project: null, skills: [], dispose() {} }),
+      errorText: String,
+      createTransport: () => ({
+        stream(request, cb) {
+          requests.push(request)
+          callbacks.push(cb)
+          return { cancel: () => cb.onDone() }
+        },
+      }),
+    })
+    cleanups.push(() => connected.dispose())
+    await connected.controller.create()
+    const first = connected.host.conversations.selectedId!
+    await connected.controller.target(first, 'A')
+    const files = (await connected.client.addAttachments(first, [path]))!.accepted
+    const composer = connected.host.conversations.state(first).composer
+    connected.host.conversations.edit(first, {
+      composer: { ...composer, text: 'Read material', attachments: files },
+    })
+    await connected.controller.send(first)
+    await until(() => requests.length === 1)
+    expect(JSON.stringify(requests[0])).toContain('material.md')
+    callbacks[0]!.onToolCall({
+      id: 'attachment-call',
+      name: 'read_attachment',
+      input: { index: 0 },
+    })
+    callbacks[0]!.onDone()
+    await until(() => requests.length === 2)
+    expect(JSON.stringify(requests[1])).toContain('ATTACHMENT BODY')
+    await connected.controller.create()
+    const second = connected.host.conversations.selectedId!
+    expect(connected.host.conversations.state(second).composer.attachments).toEqual([])
+    callbacks[1]!.onDelta('Read the attachment')
+    callbacks[1]!.onDone()
+    await until(() => !connected.host.busy())
+    const history = await connected.client.load(connected.host.conversations.state(first).origin)
+    expect(history.messages[0]!.attachments).toEqual(files)
+    expect(JSON.stringify(history)).not.toContain('ATTACHMENT BODY')
+    expect(connected.host.conversations.selectedId).toBe(second)
+  })
+
+  it('creates project conversations without reading context, then binds guarded project tools to the explicit send', async () => {
+    const f = fixture()
+    f.projects.listProjects.mockResolvedValue([
+      { id: 'project-one', name: 'Project one', missing: false } as ProjectListItem,
+    ])
+    f.chats.newChat.mockResolvedValue({ chatId: 'new-project-chat' })
+    f.chats.openChat.mockResolvedValue({ status: 'missing' })
+    f.chats.append.mockResolvedValue({ status: 'saved' })
+    const requests: AgentStreamRequest[] = []
+    let cb!: AgentStreamCallbacks
+    const connected = await connectWorkspacePanel(f.api, {
+      gate: () => ({ kind: 'run' }),
+      admit: () => true,
+      prepare: async () => ({ project: null, skills: [], dispose() {} }),
+      errorText: String,
+      createTransport: () => ({
+        stream(request, callbacks) {
+          requests.push(request)
+          cb = callbacks
+          return { cancel: () => callbacks.onDone() }
+        },
+      }),
+    })
+    cleanups.push(() => connected.dispose())
+    await connected.controller.create()
+    const local = connected.host.conversations.selectedId!
+    await connected.controller.create('project-one')
+    const id = connected.host.conversations.selectedId!
+    expect(id).not.toBe(local)
+    expect(connected.host.conversations.state(id).origin).toEqual({
+      kind: 'project',
+      projectId: 'project-one',
+      chatId: 'new-project-chat',
+    })
+    expect(f.projectRuntime.guide.readContext).not.toHaveBeenCalled()
+    expect(requests).toEqual([])
+    connected.host.conversations.edit(id, {
+      composer: { ...connected.host.conversations.state(id).composer, text: 'Use this project' },
+    })
+    await connected.controller.send(id)
+    await until(() => requests.length === 1)
+    expect(requests[0]!.system).toContain('PROJECT INSTRUCTIONS')
+    expect(JSON.stringify(requests[0]!.messages)).not.toContain('PROJECT INSTRUCTIONS')
+    expect(requests[0]!.tools.map((t) => t.name)).toContain('project_read')
+    const binding = connected.host.conversations.state(id).runs[0]!.input.project!
+    expect(JSON.stringify(binding)).not.toContain('private-scope')
+    cb.onToolCall({ id: 'project-read', name: 'project_read', input: { path: 'material.md' } })
+    cb.onDone()
+    await until(() => f.projectRuntime.tools.read.mock.calls.length === 1)
+    expect(f.projectRuntime.tools.read).toHaveBeenCalledWith(10, {
+      relPath: 'material.md',
+      scope: 'private-scope',
+    })
+    connected.controller.select(local)
+    const run = connected.host.conversations.state(id).runs[0]!.run
+    await connected.host.cancel(run)
+    expect(f.projectRuntime.tools.closeScope).toHaveBeenCalledWith(10, { scope: 'private-scope' })
+    expect(connected.host.conversations.selectedId).toBe(local)
+    expect(connected.host.conversations.state(local).messages).toEqual([])
+    await expect(
+      connected.client.projectTool(
+        {
+          owner: connected.client.session.owner,
+          conversationId: id,
+          runId: run.runId,
+          bindingId: 1,
+        },
+        'read',
+        { path: 'material.md' },
+      ),
+    ).rejects.toThrow('invalid-request')
+  })
+
+  it('rejects arbitrary project capabilities and raw scopes before service calls', async () => {
+    const f = fixture()
+    const client = await WorkspacePanelClient.connect(f.api)
+    const { run } = await open(f, client)
+    await expect(
+      client.enqueue({
+        conversationId: run.conversationId,
+        runId: 'forged-project',
+        targetId: (await client.capture('A')).id,
+        referenceIds: [],
+        project: { id: 'project-one', contextVersion: 'forged' },
+      }),
+    ).rejects.toThrow('invalid-request')
+    expect(
+      await f.raw(
+        {
+          kind: 'project-tool',
+          run,
+          method: 'read',
+          args: { path: 'material.md', scope: 'private-scope' },
+        },
+        client.session,
+      ),
+    ).toEqual({ ok: false, reason: 'invalid-request' })
+    expect(
+      await f.raw(
+        {
+          kind: 'project-tool',
+          run,
+          method: 'remember',
+          args: { change: { op: 'replace', old: 'one' } },
+        },
+        client.session,
+      ),
+    ).toEqual({ ok: false, reason: 'invalid-request' })
+    expect(f.projectRuntime.guide.readContext).not.toHaveBeenCalled()
+    expect(f.projectRuntime.tools.read).not.toHaveBeenCalled()
+  })
+
+  it('refuses changed project context in the FIFO queue and restores the original draft', async () => {
+    const f = fixture()
+    f.projects.listProjects.mockResolvedValue([
+      { id: 'project-one', name: 'Project one', missing: false } as ProjectListItem,
+    ])
+    f.chats.newChat.mockResolvedValue({ chatId: 'queued-project-chat' })
+    f.chats.openChat.mockResolvedValue({ status: 'missing' })
+    const callbacks: AgentStreamCallbacks[] = []
+    const connected = await connectWorkspacePanel(f.api, {
+      gate: () => ({ kind: 'run' }),
+      admit: () => true,
+      prepare: async () => ({ project: null, skills: [], dispose() {} }),
+      errorText: String,
+      createTransport: () => ({
+        stream(_request, cb) {
+          callbacks.push(cb)
+          return { cancel: () => cb.onDone() }
+        },
+      }),
+    })
+    cleanups.push(() => connected.dispose())
+    await connected.controller.create()
+    const first = connected.host.conversations.selectedId!
+    connected.host.conversations.edit(first, {
+      composer: { ...connected.host.conversations.state(first).composer, text: 'First request' },
+    })
+    await connected.controller.send(first)
+    await until(() => callbacks.length === 1)
+    await connected.controller.create('project-one')
+    const second = connected.host.conversations.selectedId!
+    connected.host.conversations.edit(second, {
+      composer: {
+        ...connected.host.conversations.state(second).composer,
+        text: 'Review this project',
+      },
+    })
+    await connected.controller.send(second)
+    expect(f.projectRuntime.guide.readContext).toHaveBeenCalledOnce()
+    expect(f.projectRuntime.tools.openScope).not.toHaveBeenCalled()
+    f.context.instructions!.text = 'CHANGED IN QUEUE'
+    callbacks[0]!.onDelta('First reply')
+    callbacks[0]!.onDone()
+    await until(() => connected.host.conversations.state(second).runs.length === 0)
+    expect(callbacks).toHaveLength(1)
+    expect(connected.host.conversations.state(second).composer.text).toBe('Review this project')
+    expect(connected.host.conversations.state(second).error).not.toBeNull()
+    expect(f.projectRuntime.tools.openScope).not.toHaveBeenCalled()
+  })
   it('routes home memory through the original host, releases its lease and never creates a chat file', async () => {
     const f = fixture()
     const messages = [
@@ -403,6 +1028,12 @@ describe('private workspace shell service and cloned preload bridge', () => {
         await f.raw({ kind: 'capture', tabId: 'B' }, client.session, event as IpcMainInvokeEvent),
       ).toMatchObject({ ok: false, reason: 'wrong-owner' })
     const invalid: unknown[] = [
+      { kind: 'drive-pick', conversationId: 'unopened' },
+      { kind: 'drive-check', run: { ...run, owner: null } },
+      { kind: 'drive-search', run, query: 'x', limit: 21 },
+      { kind: 'drive-search', run, query: 'x', limit: 0.5 },
+      { kind: 'drive-read', run, fileId: '../outside', offset: 0 },
+      { kind: 'drive-read', run, fileId: 'report', offset: -1 },
       {
         kind: 'execute',
         args: [run, target.binding.document, { id: 'x', name: 'write', input: null }],
@@ -625,5 +1256,182 @@ describe('private workspace shell service and cloned preload bridge', () => {
     callbacks[2]!.onToolCall({ id: 'late', name: 'write', input: { text: 'must not apply' } })
     callbacks[2]!.onDone()
     expect(f.a.body()).toBe('A UNSAVED')
+  })
+})
+
+describe('workspace Drive through the production IPC bridge', () => {
+  it('binds reads to the running conversation, blocks outbound tools and omits fetched bodies from history', async () => {
+    const f = fixture()
+    const requests: AgentStreamRequest[] = []
+    const callbacks: AgentStreamCallbacks[] = []
+    const outbound = vi.fn(async () => ({ output: 'must not run', summary: 'web' }))
+    const connected = await connectWorkspacePanel(f.api, {
+      gate: () => ({ kind: 'run' }),
+      admit: () => true,
+      errorText: String,
+      prepare: async () => ({
+        project: null,
+        skills: [
+          {
+            id: 'web',
+            systemPrompt: '',
+            tools: [{ name: 'web_search', description: 'search', inputSchema: { type: 'object' } }],
+            executeTool: outbound,
+          },
+        ],
+        dispose() {},
+      }),
+      createTransport: () => ({
+        stream(request, cb) {
+          requests.push(request)
+          callbacks.push(cb)
+          return { cancel: () => cb.onDone() }
+        },
+      }),
+    })
+    cleanups.push(() => connected.dispose())
+    await connected.controller.create()
+    const id = connected.host.conversations.selectedId!
+    await connected.controller.target(id, 'A')
+    expect(f.drive.read).not.toHaveBeenCalled()
+    expect(requests).toEqual([])
+    connected.host.conversations.edit(id, {
+      composer: { ...connected.host.conversations.state(id).composer, text: 'Read report' },
+    })
+    await connected.controller.send(id)
+    await until(() => requests.length === 1)
+    callbacks[0]!.onToolCall({ id: 'read-drive', name: 'drive_read', input: { file_id: 'report' } })
+    callbacks[0]!.onDone()
+    await connected.controller.create()
+    const other = connected.host.conversations.selectedId!
+    await until(() => requests.length === 2)
+    expect(JSON.stringify(requests[1])).toContain('PRIVATE DRIVE BODY')
+    callbacks[1]!.onToolCall({ id: 'web', name: 'web_search', input: { query: 'private' } })
+    callbacks[1]!.onDone()
+    await until(() => requests.length === 3)
+    expect(outbound).not.toHaveBeenCalled()
+    expect(JSON.stringify(requests[2])).toContain('content read from Google Drive')
+    callbacks[2]!.onDelta('Finished Drive request')
+    callbacks[2]!.onDone()
+    await until(() => !connected.host.busy())
+    const history = await connected.client.load(connected.host.conversations.state(id).origin)
+    expect(JSON.stringify(history)).not.toContain('PRIVATE DRIVE BODY')
+    expect(history.messages.at(-1)?.tools?.some((t) => t.name === 'drive_read')).toBe(true)
+    expect(connected.host.conversations.state(other).messages).toEqual([])
+    f.drive.status.mockReturnValue({ connected: true, enabled: false, allowed: false })
+    await connected.controller.target(id, 'A')
+    connected.host.conversations.edit(id, {
+      composer: {
+        ...connected.host.conversations.state(id).composer,
+        text: 'Continue with report',
+      },
+    })
+    await connected.controller.send(id)
+    await until(() => !connected.host.busy())
+    expect(requests).toHaveLength(3)
+    expect(connected.host.conversations.state(id).composer.text).toBe('Continue with report')
+  })
+})
+
+describe('project template service ownership', () => {
+  it('derives copy placement from the original conversation and validates its target before opening', async () => {
+    const f = fixture()
+    f.projects.listProjects.mockResolvedValue([
+      { id: 'project-one', name: 'Project one', missing: false } as ProjectListItem,
+    ])
+    f.chats.newChat.mockResolvedValue({ chatId: 'project-copy-chat' })
+    f.chats.openChat.mockResolvedValue({ status: 'missing' })
+    const client = await WorkspacePanelClient.connect(f.api)
+    const project = await client.create('project-one')
+    const local = await client.create()
+    await client.load(project.origin)
+    await client.load(local.origin)
+    const input = { skillId: 'app:one', text: 'Fill copy', chips: [] }
+    expect(await client.openTemplate(workspaceConversationKey(project.origin), input, 'A')).toEqual(
+      { ok: true, tabId: 'copy' },
+    )
+    expect(f.openTemplate).toHaveBeenLastCalledWith(input, 'project-one', 'A')
+    await client.openTemplate(workspaceConversationKey(local.origin), input)
+    expect(f.openTemplate).toHaveBeenLastCalledWith(input, null, undefined)
+    await expect(
+      client.openTemplate(workspaceConversationKey(project.origin), input, 'recovery'),
+    ).rejects.toBeDefined()
+    await expect(client.openTemplate('unopened', input)).rejects.toBeDefined()
+    expect(f.openTemplate).toHaveBeenCalledTimes(2)
+    expect(f.projectRuntime.guide.readContext).not.toHaveBeenCalled()
+    await client.dispose()
+  })
+
+  it('requires an acknowledged project copy capability before completion can save it', async () => {
+    const f = fixture()
+    f.projects.listProjects.mockResolvedValue([
+      { id: 'project-one', name: 'Project one', missing: false } as ProjectListItem,
+    ])
+    f.chats.newChat.mockResolvedValue({ chatId: 'project-copy-chat' })
+    f.chats.openChat.mockResolvedValue({ status: 'missing' })
+    const client = await WorkspacePanelClient.connect(f.api)
+    const source = await client.create('project-one')
+    await client.load(source.origin)
+    const conversationId = workspaceConversationKey(source.origin)
+    await client.entriesReady(true)
+    const from = {
+      sender: { id: 21, mainFrame: {}, isDestroyed: () => false },
+      senderFrame: {},
+    } as unknown as IpcMainInvokeEvent
+    Object.assign(from, { senderFrame: from.sender.mainFrame })
+    f.tabs.tabIdForWebContents.mockReturnValue('A')
+    f.tabs.webContentsForTab.mockReturnValue(from.sender)
+    const entries: Extract<
+      import('../src/shared/workspace-panel-api').WorkspacePanelEvent,
+      { kind: 'entry' }
+    >[] = []
+    client.subscribe((event) => {
+      if (event.kind === 'entry') entries.push(event)
+    })
+    const offered = f.service.offerTemplate(
+      from,
+      { id: 'project-copy', mode: 'skill', target: 'docs', text: 'Fill', chips: [], createdAt: 1 },
+      'project-one',
+    )
+    await until(() => entries.length === 1)
+    expect(entries[0]!.entry).toMatchObject({ projectId: 'project-one' })
+    await client.acknowledgeEntry(entries[0]!.entryId!, true, conversationId)
+    expect(await offered).toBe(true)
+    const other = await client.create()
+    await client.load(other.origin)
+    await expect(
+      client.enqueue({
+        conversationId: workspaceConversationKey(other.origin),
+        runId: 'wrong-conversation',
+        targetId: entries[0]!.capture.id,
+        referenceIds: [],
+        project: null,
+      }),
+    ).rejects.toBeDefined()
+    const prepared = await client.prepareProject(conversationId, 'project-one')
+    const binding = await client.enqueue({
+      conversationId,
+      runId: 'project-run',
+      targetId: entries[0]!.capture.id,
+      referenceIds: [],
+      project: prepared.binding,
+    })
+    await client.startNext()
+    const original = f.aRequestOriginal
+    f.aRequest.mockImplementation((operation, signal) =>
+      operation.kind === 'save-project-copy'
+        ? (Promise.resolve(true) as never)
+        : original(operation, signal),
+    )
+    await client.complete(binding)
+    expect(f.aRequest.mock.calls.filter(([op]) => op.kind === 'save-project-copy')).toEqual([
+      [
+        expect.objectContaining({ kind: 'save-project-copy', projectId: 'project-one' }),
+        expect.any(AbortSignal),
+      ],
+    ])
+    await expect(client.complete(binding)).rejects.toBeDefined()
+    expect(f.aRequest.mock.calls.filter(([op]) => op.kind === 'save-project-copy')).toHaveLength(1)
+    await client.dispose()
   })
 })

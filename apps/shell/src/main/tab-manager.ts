@@ -381,7 +381,7 @@ export class TabManager {
   /**
    * Reserve panel space without changing any document or saved split ratio.
    * The returned layout must be forwarded to AppFrame, including its divider.
-   * No default production host is attached during this stage.
+   * The shell host releases this reservation when collapsed or disconnected.
    */
   setWorkspacePanel(panel: Readonly<WorkspacePanelLayout> | null): WorkspaceLayout {
     this.workspacePanel = panel ? { ...panel } : null
@@ -1997,7 +1997,7 @@ export class TabManager {
   /** One main-owned coordinator per panel generation; no provider is started here. */
   workspaceAiForPanel(
     generation: number,
-    events: Pick<WorkspaceExecutionDeps, 'onStopped' | 'onDisposed'> = {},
+    events: Pick<WorkspaceExecutionDeps, 'onStopped' | 'onDisposed' | 'onQueueChanged'> = {},
   ): WorkspaceExecutionController {
     if (!Number.isSafeInteger(generation) || generation <= 0)
       throw new Error('invalid panel generation')
@@ -2022,6 +2022,7 @@ export class TabManager {
         return tab && client ? { kind: tab.kind as DocumentTabKind, client } : null
       },
       onStopped: events.onStopped,
+      onQueueChanged: events.onQueueChanged,
       onDisposed: () => {
         panel.removeListener('did-start-navigation', onNavigation)
         panel.removeListener('render-process-gone', onClosed)

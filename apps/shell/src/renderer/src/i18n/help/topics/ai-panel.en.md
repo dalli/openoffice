@@ -2,6 +2,20 @@
 
 Every editor can summon the AI panel: select something, give an instruction, watch the streamed result.
 
+## Shared window assistant
+
+Open the shared panel with **AI Assistant** in the main window’s tab bar. It starts closed. Start or select a conversation, then choose an edit target and reference scopes from HWP/HWPX, DOCX/ODT or Markdown/text documents open in the same window. Switching tabs or collapsing the panel keeps drafts and running work. Use **Stop** to end work. Typing and changing conversations do not send requests. Existing editor AI panels remain available.
+
+For a Word document target, Summarize, Polish, Format and Mind Map fill the input with a request. Press Send to run it; Polish uses the originally selected text when there is a selection. Mind maps stay in their conversation and support collapsing branches and PNG/SVG downloads. Clicking a topic fills a question about the same target; if you changed targets, select the original document again first.
+
+For a Word target, long writing appears in the document as it arrives. Stop in the writing progress pauses the writer and lets you keep or discard the partial text. Stop beside the input ends the whole run and removes the unfinished draft. The choice stays in the original conversation. Completed or kept writing can be restored with Undo this run.
+
+In the main window, Word’s ribbon, menu, F7 and context-menu AI actions open a new shared conversation using the clicked document and selection. Existing confirmations and immediate execution still apply; opening or collapsing the assistant keeps the current conversation. Detached or standalone windows and a host that is not ready use the existing panel. Its collapsed rail remains available.
+
+In the main window, adding a Word selection edit opens the shared conversation for that document. Its queued-edit card lets you locate passages, edit instructions, remove items or confirm discarding the queue. Sending transfers the batch to a new shared conversation; a blocked connection keeps the request as its draft. A failed transfer keeps the queue, and changed documents cannot run old batch positions. Detached and standalone windows keep the existing panel.
+
+In the main window, a Word skill template copy transfers its request and skill chips once to a new shared conversation. A blocked connection keeps the draft there. Project copies use their original project context and save to that folder with a free name after a successful run. Blank-template previews and unavailable shared hosts use the existing editor panel.
+
 ## Opening and using it
 
 - The panel needs a connected AI. With none connected it shows the connect cards instead of an error; see [Subscription connection](help://subscription).

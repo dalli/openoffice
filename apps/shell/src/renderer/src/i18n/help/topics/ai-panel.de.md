@@ -2,6 +2,20 @@
 
 Jeder Editor kann den KI-Bereich aufrufen: Etwas auswählen, eine Anweisung geben und das gestreamte Ergebnis ansehen.
 
+## Gemeinsamer Assistent im Fenster
+
+Öffnen Sie das gemeinsame Panel über **KI-Assistent** in der Tableiste des Hauptfensters. Anfangs ist es geschlossen. Erstellen oder wählen Sie ein Gespräch und anschließend das Bearbeitungsziel und die Referenzbereiche aus den im selben Fenster geöffneten HWP/HWPX-, DOCX/ODT- oder Markdown/Text-Dokumenten. Tabwechsel und Einklappen erhalten Entwürfe und laufende Aufgaben. **Stopp** beendet die Aufgabe. Texteingabe und Gesprächswechsel senden keine Anfragen. Die bisherigen KI-Panels der Editoren bleiben verfügbar.
+
+Bei einem Word-Dokument als Ziel füllen Zusammenfassen, Überarbeiten, Formatieren und Mindmap das Eingabefeld. Erst Senden startet die Anfrage; Überarbeiten verwendet den ursprünglich ausgewählten Text, sofern eine Auswahl besteht. Mindmaps bleiben in ihrem Gespräch und bieten einklappbare Zweige und PNG/SVG-Downloads. Ein Klick auf ein Thema bereitet eine Frage zum selben Ziel vor; nach einem Zielwechsel wählen Sie zuerst wieder das ursprüngliche Dokument.
+
+Bei einem Word-Ziel erscheint längerer Text während des Schreibens im Dokument. Stopp in der Schreibfortschrittsanzeige hält den Schreibvorgang an und lässt Sie den bisherigen Text behalten oder verwerfen. Stopp neben dem Eingabefeld beendet den gesamten Lauf und entfernt den unfertigen Entwurf. Die Entscheidung bleibt im ursprünglichen Gespräch. Fertigen oder behaltenen Text können Sie mit der Rücknahme dieses Laufs rückgängig machen.
+
+Im Hauptfenster öffnen die KI-Aktionen von Word im Menüband, Menü, über F7 und im Kontextmenü ein neues gemeinsames Gespräch mit dem angeklickten Dokument und seiner Auswahl. Bisherige Bestätigungen und sofortige Ausführung bleiben erhalten; das Öffnen und Einklappen behält das aktuelle Gespräch. Abgetrennte oder eigenständige Fenster, ein noch nicht bereiter Host nutzen das bisherige Panel. Es bleibt über seine eingeklappte Leiste erreichbar.
+
+Im Hauptfenster öffnet das Einreihen einer Word-Auswahlbearbeitung das gemeinsame Gespräch des Dokuments. Auf der Karte können Sie Textstellen aufsuchen, Anweisungen ändern, Einträge entfernen oder das Leeren der Warteschlange bestätigen. Senden übergibt den Stapel an ein neues gemeinsames Gespräch; bei gesperrter Verbindung bleibt er als Entwurf erhalten. Eine fehlgeschlagene Übergabe behält die Warteschlange, und geänderte Dokumente verwenden keine alten Positionen. Abgetrennte und eigenständige Fenster behalten das bisherige Panel.
+
+Im Hauptfenster überträgt eine Word-Skill-Vorlagenkopie ihre Anfrage und Skill-Chips einmalig an eine neue gemeinsame Unterhaltung. Bei blockierter Verbindung bleibt die Anfrage dort als Entwurf. Projektkopien verwenden den Kontext ihres ursprünglichen Projekts und werden nach erfolgreichem Abschluss unter einem freien Namen in dessen Ordner gespeichert. Vorschauen leerer Vorlagen und nicht verfügbare gemeinsame Hosts verwenden das bisherige Editor-Panel.
+
 ## Öffnen und verwenden
 
 - Der Bereich braucht eine verbundene KI. Ist keine verbunden, zeigt er statt einer Fehlermeldung die Karten zum Verbinden; siehe [Abonnement-Verbindung](help://subscription).

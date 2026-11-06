@@ -937,6 +937,7 @@ export interface AgentWorkspaceVersion {
 
 export interface AgentWorkspaceState extends AgentWorkspaceVersion {
   foreignChanges: number
+  readOnly: boolean
   /** HWP has no masking marker support; callers must not describe this as redacted content. */
   masking: 'unsupported'
   selection: AgentSelectionResult
@@ -954,6 +955,14 @@ export interface AgentPluginSurface {
   foreignChanges(): number
   workspaceState(): AgentWorkspaceState
   workspaceSnapshot(): AgentWorkspaceSnapshot
+  workspaceCaptureRollback(
+    expected: AgentWorkspaceVersion,
+  ): { ok: true; id: string } | { ok: false; reason: 'changed' | 'unavailable' }
+  workspaceRollback(
+    expected: AgentWorkspaceVersion,
+    id: string,
+  ): ({ ok: true } & AgentWorkspaceVersion) | { ok: false; reason: 'changed' | 'unavailable' }
+  workspaceReleaseRollback(id: string): void
   workspaceInvoke(
     expected: AgentWorkspaceVersion,
     method: string,

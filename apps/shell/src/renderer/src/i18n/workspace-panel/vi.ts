@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const vi = {
+  sendScope:
+    'Khi gửi yêu cầu, nội dung tài liệu cần sửa cùng phạm vi tham khảo, tệp đính kèm, kỹ năng và ngữ cảnh dự án bạn chọn sẽ được gửi đến AI đã chọn.',
+  attachmentLimit: 'Bạn có thể đính kèm tối đa 20 tệp cho mỗi tin nhắn.',
+  polishPrompt:
+    'Chỉnh sửa phần đã chọn cố định, hoặc toàn bộ tài liệu nếu không có văn bản được chọn, để cách viết rõ ràng và trôi chảy hơn.',
   conversation: 'Cuộc trò chuyện',
   newConversation: 'Cuộc trò chuyện mới',
   target: 'Tài liệu cần sửa',

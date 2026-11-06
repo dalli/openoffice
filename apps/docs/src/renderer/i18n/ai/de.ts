@@ -36,6 +36,8 @@ export const de = {
   aiChipChartData: 'Diagrammdaten aktualisieren',
   aiChipChartTitle: 'Diagrammtitel ändern',
   aiChipTableEdit: 'Zeilen/Spalten anpassen',
+  aiQueueTransferFailed:
+    'Die Änderungen konnten nicht übergeben werden. Die Warteschlange bleibt erhalten. Prüfen Sie das Dokument und senden Sie erneut.',
   aiQueueTitle: 'Wartende Änderungen',
   aiQueueHint:
     'Klicke auf eine Zeile, um die Stelle zu finden; beim Senden werden alle Änderungen in einer Anfrage angewendet',

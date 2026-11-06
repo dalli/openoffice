@@ -197,6 +197,11 @@ import {
   authorizeMcpDocWrite,
   activeAiStreamCount,
   legacyDocumentChatFor,
+  collectAttachments,
+  streamWorkspaceAi,
+  savePastedImage,
+  readAttachmentText,
+  readAttachmentImage,
 } from '../../../docs/src/main/docs-main'
 import { blankXlsxBuffer } from '@genoffice/xlsx-gateway/gateway/csv-import'
 import { blankPdfBuffer } from '../../../pdf/src/main/blank-pdf'
@@ -5175,7 +5180,8 @@ function createShellWindow(): void {
       if (contents) followOpenerProject(contents, { kind: 'window', webContentsId: owner })
     },
     newDocumentDir: (id) => newDocumentFolderFor(id),
-    writeNewDocument: (id, fileName, bytes) => writeProjectNewDocument(id, fileName, bytes),
+    writeNewDocument: (id, fileName, bytes, expectedProjectId) =>
+      writeProjectNewDocument(id, fileName, bytes, expectedProjectId),
     listTabs: () =>
       (tabManager?.list() ?? [])
         .filter((t) => t.kind === 'docs')
@@ -5991,8 +5997,9 @@ async function writeProjectNewDocument(
   webContentsId: number,
   fileName: string,
   bytes: Uint8Array,
+  expectedProjectId?: string,
 ): Promise<string | null> {
-  const written = await newDocuments.writeFor(webContentsId, fileName, bytes)
+  const written = await newDocuments.writeFor(webContentsId, fileName, bytes, expectedProjectId)
   // the new file belongs in the next file list right away
   if (written) projectFileLister.invalidate()
   return written
@@ -9311,8 +9318,8 @@ registerProjectIpc()
 registerDocsIpc()
 registerHomeIpc()
 registerProjectFolderChannels()
-// The service is available to an explicitly attached host. Startup reserves no AI space
-// and starts no model; the existing editor panels remain until preparation is migrated.
+// The normal shell attaches one host after onboarding. Opening its surface reserves
+// AI space without starting a model; editor panels remain until their features migrate.
 const workspaceHistories = new WeakMap<BrowserWindow, WorkspaceConversationHistory>()
 const workspaceServicesFor = (
   event: Electron.IpcMainInvokeEvent,
@@ -9338,6 +9345,32 @@ const workspaceServicesFor = (
     window: win,
     tabs: manager,
     history,
+    projects: runtime,
+    projectMemoryChanged: (id) => projectFolderIpc?.changed(id, 'memory'),
+    drive: driveService?.ai,
+    stream: (request, signal, send) => streamWorkspaceAi(win.webContents, request, signal, send),
+    attachments: {
+      add: collectAttachments,
+      read: readAttachmentText,
+      image: readAttachmentImage,
+      paste: (bytes, ext) => {
+        const path = savePastedImage(bytes, ext)
+        return path ? collectAttachments([path]) : { accepted: [], rejected: [] }
+      },
+      pick: async () => {
+        const result = await dialog.showOpenDialog(win, {
+          properties: ['openFile', 'multiSelections'],
+        })
+        return result.canceled ? null : collectAttachments(result.filePaths)
+      },
+    },
+    openTemplate: (input, projectId, targetTabId) =>
+      templateTabs.openTemplate(input, win.webContents.id, {
+        id: projectId,
+        docPath: targetTabId
+          ? (manager.list().find((tab) => tab.id === targetTabId)?.filePath ?? null)
+          : null,
+      }),
     sources: () =>
       workspacePanelSources(local, runtime.guide, runtime.chats, [
         ...workspaceLegacySources.sources((wc) => {
@@ -9447,8 +9480,15 @@ const templateTabs = createTemplateTabs({
   templateFileOf: (id) => userSkills.templateFile(id),
   openCopy: (copy) => openTemplateCopyTab(copy),
   // a skill template's copy follows the project of the panel that asked (spec 6)
-  copyOpenedFor: (contents, openerId) =>
-    followOpenerProject(contents, { kind: 'window', webContentsId: openerId }),
+  copyOpenedFor: (contents, openerId, project) => {
+    if (project) {
+      newDocuments.preset(
+        contents.id,
+        Promise.resolve(newDocuments.placementInProject(project.id, project.docPath)),
+      )
+      contents.once('destroyed', () => newDocuments.forget(contents.id))
+    } else followOpenerProject(contents, { kind: 'window', webContentsId: openerId })
+  },
   focusTab: (tabId) => {
     const manager = tabManager
     if (!manager || !manager.list().some((tab) => tab.id === tabId)) return false
@@ -9463,7 +9503,11 @@ const templateTabs = createTemplateTabs({
   newId: () => randomUUID(),
   now: () => Date.now(),
 })
-registerTemplateTabsIpc(templateTabs)
+registerTemplateTabsIpc(templateTabs, async (event, handoff) => {
+  if (!projectFolderIpc) return false
+  const projectId = await projectFolderIpc.windowProject(event.sender.id)
+  return workspacePanelIpc?.offerTemplate(event, handoff, projectId ?? undefined) ?? false
+})
 
 /** A template copy's new untitled tab: sheets here (its backing workbook), the others in the tab manager */
 async function openTemplateCopyTab(copy: TemplateCopy): Promise<OpenedCopyTab | null> {

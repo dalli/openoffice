@@ -76,6 +76,7 @@ const SPARSE_PATTERNS = [
 const CACHE = join(APP, 'node_modules', '.cache', 'rhwp-studio', TAG)
 const OUT = join(APP, 'public', 'studio')
 const AGENT_PLUGIN = join(APP, 'studio-plugin', 'agent-plugin.mjs')
+const WORKSPACE_UNDO = join(APP, 'studio-plugin', 'workspace-undo.mjs')
 const DIALOG_THEME = join(APP, 'studio-plugin', 'dialog-theme.mjs')
 const HANCOM_KEYS = join(APP, 'studio-plugin', 'hancom-keys.mjs')
 const DOCUMENT_INFO = join(APP, 'studio-plugin', 'document-info.mjs')
@@ -102,6 +103,7 @@ function stampValue() {
   }
   // the app's own plugin and the Hangul keys are compiled into the studio
   hash.update(readFileSync(AGENT_PLUGIN))
+  hash.update(readFileSync(WORKSPACE_UNDO))
   hash.update(readFileSync(DIALOG_THEME))
   hash.update(readFileSync(HANCOM_KEYS))
   hash.update(readFileSync(DOCUMENT_INFO))

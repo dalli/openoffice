@@ -4,9 +4,15 @@ import type {
   WorkspacePrepareRequest,
   WorkspaceReadRequest,
   WorkspaceReadSnapshot,
+  WorkspaceTemplateMode,
+  WorkspaceTemplateSnapshot,
+  WorkspaceWriterUpdate,
 } from './workspace-adapter'
 import type { ExecutedToolCall } from './skill'
 import type { AgentToolCall, AgentToolDef, ToolExecution } from './types'
+import type { WorkspaceEditQueueCommand, WorkspaceEditQueueSnapshot } from './workspace-edit-queue'
+export { isWorkspaceEditQueueCommand, isWorkspaceEditQueueSnapshot } from './workspace-edit-queue'
+export type { WorkspaceEditQueueCommand, WorkspaceEditQueueSnapshot } from './workspace-edit-queue'
 
 /** Private main-to-editor protocol. It is not an editor-to-editor or panel API. */
 export const WORKSPACE_EDITOR_CHANNELS = {
@@ -27,7 +33,7 @@ export interface WorkspaceEditorDescription {
 /** Contains no document text or paths. A new host invalidates old prepared sessions. */
 export interface WorkspaceEditorEvent {
   readonly hostId: string
-  readonly kind: 'ready' | 'changed' | 'disposed'
+  readonly kind: 'ready' | 'changed' | 'queue-changed' | 'disposed'
 }
 
 export interface WorkspaceEditorSession {
@@ -41,13 +47,37 @@ export interface WorkspaceEditorSession {
 }
 
 export type WorkspaceEditorOperation =
+  | {
+      readonly kind: 'save-project-copy'
+      readonly runId: string
+      readonly state: WorkspaceAdapterState
+      readonly projectId: string
+    }
+  | {
+      readonly kind: 'edit-queue'
+      readonly state: WorkspaceAdapterState
+      readonly command: WorkspaceEditQueueCommand
+    }
+  | {
+      readonly kind: 'writer-update'
+      readonly sessionId: string
+      readonly runId: string
+      readonly callId: string
+      readonly update: WorkspaceWriterUpdate
+    }
   | { readonly kind: 'capture' }
+  | { readonly kind: 'refresh'; readonly state: WorkspaceAdapterState }
   | {
       readonly kind: 'rollback'
       readonly rollbackId: string
       readonly state: WorkspaceAdapterState
     }
   | { readonly kind: 'describe' }
+  | {
+      readonly kind: 'template'
+      readonly state: WorkspaceAdapterState
+      readonly mode: WorkspaceTemplateMode
+    }
   | {
       readonly kind: 'read'
       readonly state: WorkspaceAdapterState
@@ -76,8 +106,13 @@ export interface WorkspaceEditorRequest {
 }
 
 export interface WorkspaceEditorValues {
+  'save-project-copy': boolean
+  'edit-queue': WorkspaceEditQueueSnapshot | null
+  'writer-update': null
   describe: WorkspaceEditorDescription
+  template: WorkspaceTemplateSnapshot | null
   capture: WorkspaceAdapterState
+  refresh: WorkspaceAdapterState
   read: WorkspaceReadSnapshot
   prepare: WorkspaceEditorSession
   execute: { result: ToolExecution; state: WorkspaceAdapterState; rollbackId?: string | null }

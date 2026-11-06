@@ -18,6 +18,8 @@ import type {
   CodexModelCatalog,
 } from '@genoffice/ai-provider/browser'
 import { installDropOpenBridge } from '@genoffice/electron-utils/drop-open'
+import { docAttachBridge } from '@genoffice/electron-utils/doc-attach-bridge'
+import { DOC_ATTACH_BRIDGE_KEY } from '@genoffice/electron-utils/doc-attach-channels'
 import { workspacePanelBridge } from './workspace-panel-bridge'
 import { workspaceMemoryBridge } from './workspace-memory-bridge'
 import { mcpToolsBridge } from '@genoffice/electron-utils/mcp-tools-bridge'
@@ -518,6 +520,11 @@ const homeApi: HomeApi = {
   async getAiPanelPrefs() {
     return normalizeAiPanelPrefs(await ipcRenderer.invoke(HOME_CHANNELS.getAiPanelPrefs))
   },
+  onAiPanelPrefsChanged(handler) {
+    const listener = (_event: unknown, prefs: unknown) => handler(normalizeAiPanelPrefs(prefs))
+    ipcRenderer.on('app:ai-panel-prefs-changed', listener)
+    return () => ipcRenderer.removeListener('app:ai-panel-prefs-changed', listener)
+  },
   async setAiPanelPrefs(patch) {
     return normalizeAiPanelPrefs(await ipcRenderer.invoke(HOME_CHANNELS.setAiPanelPrefs, patch))
   },
@@ -577,6 +584,9 @@ const homeApi: HomeApi = {
   },
   async getAiSettings() {
     return (await ipcRenderer.invoke('ai:get-settings')) as AiSettings
+  },
+  async openAiModelSettings() {
+    await ipcRenderer.invoke('ai:open-model-settings')
   },
   async setAiSettings(settings) {
     await ipcRenderer.invoke('ai:set-settings', settings)
@@ -955,6 +965,7 @@ const tabsApi: TabsApi = {
 }
 
 contextBridge.exposeInMainWorld('aiOfficeTabs', tabsApi)
+contextBridge.exposeInMainWorld(DOC_ATTACH_BRIDGE_KEY, docAttachBridge())
 contextBridge.exposeInMainWorld('aiOfficeWorkspacePanel', workspacePanelBridge(ipcRenderer))
 contextBridge.exposeInMainWorld('aiOfficeWorkspaceMemory', workspaceMemoryBridge(ipcRenderer))
 

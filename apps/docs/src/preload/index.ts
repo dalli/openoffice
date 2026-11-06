@@ -1,3 +1,4 @@
+import { DOCS_WORKSPACE_AI_ENTRY } from '../shared/workspace-ai-entry'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { workspaceEditorPort } from '@genoffice/agent-core/workspace-editor-protocol'
 import { driveAiBridge } from '@genoffice/electron-utils/drive-ai-bridge'
@@ -79,6 +80,7 @@ const api: DesktopApi = {
     ipcRenderer.on('app:author-name-changed', listener)
     return () => ipcRenderer.removeListener('app:author-name-changed', listener)
   },
+  workspaceAiEntry: (entry) => ipcRenderer.invoke(DOCS_WORKSPACE_AI_ENTRY, entry),
   getAiPanelPrefs: () => ipcRenderer.invoke('app:get-ai-panel-prefs'),
   setAiPanelPrefs: (patch) => ipcRenderer.invoke('app:set-ai-panel-prefs', patch),
   onAiPanelPrefsChanged: (handler) => {
@@ -186,8 +188,12 @@ const api: DesktopApi = {
     ipcRenderer.invoke('docs:capture-rect', rect),
   saveDocxNew: (defaultName: string, data: ArrayBuffer) =>
     ipcRenderer.invoke('docs:save-new', defaultName, data),
-  saveDocxIntoProject: (defaultName: string, format: DocFormat, data: ArrayBuffer) =>
-    ipcRenderer.invoke('docs:save-into-project', defaultName, format, data),
+  saveDocxIntoProject: (
+    defaultName: string,
+    format: DocFormat,
+    data: ArrayBuffer,
+    expectedProjectId?: string,
+  ) => ipcRenderer.invoke('docs:save-into-project', defaultName, format, data, expectedProjectId),
   saveDocxTo: (path: string, data: ArrayBuffer, overwrite: boolean) =>
     ipcRenderer.invoke('docs:save-to', path, data, overwrite === true),
   onMcpCommand: (handler) => {

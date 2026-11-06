@@ -10,6 +10,7 @@ import { Editor } from '@tiptap/core'
 import { buildBlankDocx, readDocxPartBase64 } from '@genoffice/docx-engine'
 import { docxToOdt, odtToDocx } from '@genoffice/odt-engine'
 import { editorExtensions } from '../src/renderer/editor/extensions'
+import { createDocsWorkspaceAdapter } from '../src/renderer/ai/workspace-adapter'
 import type { DocState } from '../src/renderer/doc-state'
 import { isOdtDoc } from '../src/renderer/doc-state'
 import type { OpenDocxResult } from '../src/shared/ipc'
@@ -41,7 +42,8 @@ vi.mock('../src/renderer/components/toast-bus', () => ({
   setToastEmitter: () => {},
 }))
 
-const { loadFile, save, writeRecoveryCopy } = await import('../src/renderer/file-actions')
+const { loadFile, save, saveIntoProject, writeRecoveryCopy, templateDocBytes } =
+  await import('../src/renderer/file-actions')
 type Ctx = Parameters<typeof loadFile>[0]
 
 let urlSeq = 0
@@ -373,6 +375,35 @@ describe('opening ODT in the Word editor', () => {
 })
 
 describe('saving an ODT document', () => {
+  it('exports an unsaved workspace template as ODT using the existing template serializer', async () => {
+    const ctx = makeCtx()
+    const original = await blankOdt()
+    await loadFile(ctx, openResult('/docs/template.odt', original))
+    setParagraphs(ctx.editor!, ['UNSAVED_ODT_TEMPLATE'])
+    const doc = docOf(ctx)
+    const adapter = createDocsWorkspaceAdapter({
+      getEditor: () => ctx.editor!,
+      getDocumentId: () => 'odt-template',
+      getNumIds: () => ({ bullet: null, ordered: null }),
+      getTemplateDocument: () => ({
+        fileName: 'template.odt',
+        title: 'template',
+        redacted: () => false,
+        bytes: () => templateDocBytes(ctx),
+      }),
+    })
+    try {
+      const snapshot = await adapter.template!(await adapter.capture(), 'as-is')
+      expect(snapshot!.fileName).toBe('template.odt')
+      expect(await part(snapshot!.bytes!, 'content.xml')).toContain('UNSAVED_ODT_TEMPLATE')
+      expect(snapshot!.bytes).toEqual(await templateDocBytes(ctx))
+      expect(docOf(ctx)).toBe(doc)
+      expect(doc.odt!.original).toEqual(original)
+      expect(written).toEqual([])
+    } finally {
+      adapter.dispose()
+    }
+  })
   it('an unchanged save writes the original ODT bytes to the .odt path', async () => {
     const ctx = makeCtx()
     const odt = await blankOdt()
@@ -772,5 +803,53 @@ describe('saving keeps the ODT baseline it was opened with', () => {
     // and a save with no further edit is the previous output exactly
     expect(await save(ctx, false)).toBe(true)
     expect(written[written.length - 1].bytes).toEqual(outputs[2])
+  })
+})
+
+describe('workspace project copy saves', () => {
+  it.each(['docx', 'odt'] as const)(
+    'uses the existing %s serializer and fixed project on a successful copy',
+    async (format) => {
+      const ctx = makeCtx()
+      const original = format === 'odt' ? await blankOdt() : await buildBlankDocx({})
+      await loadFile(ctx, openResult(`/docs/template.${format}`, original))
+      ctx.doc = { ...docOf(ctx), filePath: null }
+      ctx.editor!.commands.insertContent('<p>PROJECT_COPY_CONTENT</p>')
+      const expected = await templateDocBytes(ctx)
+      const validate = vi.fn(async () => {})
+      desktop.saveDocxIntoProject = vi.fn(async (_name, actualFormat, data, projectId) => {
+        expect(actualFormat).toBe(format)
+        expect(projectId).toBe('project-one')
+        expect(new Uint8Array(data)).toEqual(expected)
+        return { ok: false, skipped: true }
+      })
+      expect(
+        await saveIntoProject(ctx, `template.${format}`, {
+          expectedProjectId: 'project-one',
+          validate,
+        }),
+      ).toBe(false)
+      expect(validate).toHaveBeenCalledTimes(2)
+      expect(desktop.saveDocxIntoProject).toHaveBeenCalledOnce()
+      expect(written).toEqual([])
+      expect(docOf(ctx).filePath).toBeNull()
+    },
+  )
+  it('does not write a copy invalidated while serialization was in progress', async () => {
+    const ctx = makeCtx()
+    await loadFile(ctx, openResult('/docs/template.docx', await buildBlankDocx({})))
+    ctx.doc = { ...docOf(ctx), filePath: null }
+    desktop.saveDocxIntoProject = vi.fn()
+    const validate = vi
+      .fn(async () => {})
+      .mockImplementationOnce(async () => {})
+      .mockImplementationOnce(async () => {
+        throw new Error('stale-document')
+      })
+    expect(
+      await saveIntoProject(ctx, 'template.docx', { expectedProjectId: 'project-one', validate }),
+    ).toBe(false)
+    expect(desktop.saveDocxIntoProject).not.toHaveBeenCalled()
+    expect(written).toEqual([])
   })
 })

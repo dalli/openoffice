@@ -3,7 +3,7 @@ import type { Lang } from '@genoffice/i18n'
 import { DRIVE_ATTACH_STRINGS } from './strings-drive-attach'
 
 /** The Drive calls an editor's preload exposes as window.aiOfficeDriveAi */
-interface DriveAttachBridge {
+export interface DriveAttachBridge {
   driveConnected(): Promise<boolean>
   onDriveConnectedChanged(listener: (connected: boolean) => void): () => void
   drivePickAttachments(): Promise<unknown>
@@ -56,15 +56,19 @@ export function DriveAttachButton({
   lang,
   onPicked,
   className = 'ai-attach-btn',
+  driveBridge,
+  disabled = false,
 }: {
   lang: Lang
+  driveBridge?: DriveAttachBridge
+  disabled?: boolean
   onPicked: (picked: DriveAttachPicked) => void | Promise<void>
   className?: string
 }) {
   const [connected, setConnected] = useState(false)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    const b = bridge()
+    const b = driveBridge ?? bridge()
     if (!b) return
     let live = true
     void b.driveConnected().then((v) => live && setConnected(v === true))
@@ -73,12 +77,12 @@ export function DriveAttachButton({
       live = false
       off()
     }
-  }, [])
+  }, [driveBridge])
   if (!connected) return null
   const label = (DRIVE_ATTACH_STRINGS[lang] ?? DRIVE_ATTACH_STRINGS.en).label
   const pick = async () => {
-    const b = bridge()
-    if (!b || busy) return
+    const b = driveBridge ?? bridge()
+    if (!b || busy || disabled) return
     setBusy(true)
     try {
       const picked = drivePickedOf(await b.drivePickAttachments(), lang)
@@ -92,7 +96,7 @@ export function DriveAttachButton({
       type="button"
       className={`${className} ai-drive-attach-btn`}
       onClick={() => void pick()}
-      disabled={busy}
+      disabled={busy || disabled}
       data-tip={label}
       aria-label={label}
     >

@@ -2,6 +2,20 @@
 
 Todos os editores podem chamar o painel de IA: selecione algo, dê uma instrução e veja o resultado a chegar.
 
+## Assistente partilhado da janela
+
+Abra o painel partilhado com **Assistente de IA** na barra de separadores da janela principal. Começa fechado. Crie ou escolha uma conversa e selecione o documento a editar e os âmbitos de referência entre os documentos HWP/HWPX, DOCX/ODT ou Markdown/texto abertos nessa janela. Mudar de separador ou recolher o painel mantém os rascunhos e as tarefas em curso. **Parar** termina uma tarefa. Escrever ou mudar de conversa não envia pedidos. Os painéis de IA dos editores continuam disponíveis.
+
+Quando o destino é um documento Word, Resumir, Revisar, Formatar e Mapa mental preenchem o campo de entrada. Clique em Enviar para executar; a revisão usa o texto selecionado originalmente, se houver seleção. Os mapas ficam na sua conversa e permitem recolher ramos e baixar PNG/SVG. Clicar num tópico prepara uma pergunta sobre o mesmo destino; se mudou o destino, selecione primeiro o documento original.
+
+Para um documento Word, o texto longo aparece enquanto é escrito. Parar no progresso da escrita permite manter ou descartar o texto parcial. Parar junto ao campo de entrada encerra toda a execução e remove o rascunho incompleto. A escolha permanece na conversa original. O texto concluído ou mantido pode ser revertido pela opção de desfazer esta execução.
+
+Na janela principal, as ações de IA do Word no friso, nos menus, com F7 e no menu de contexto abrem uma nova conversa partilhada com o documento e a seleção escolhidos. Mantêm-se as confirmações e a execução imediata; abrir ou recolher o assistente preserva a conversa atual. Janelas separadas ou independentes, um anfitrião ainda não preparado usam o painel anterior, acessível pela sua barra recolhida.
+
+Na janela principal, adicionar uma edição da seleção do Word à fila abre a conversa partilhada desse documento. O cartão permite localizar trechos, editar instruções, remover itens ou confirmar a eliminação da fila. O envio transfere o lote para uma nova conversa partilhada; uma ligação bloqueada mantém o pedido como rascunho. Uma transferência falhada preserva a fila e documentos alterados não usam posições antigas. As janelas separadas e independentes mantêm o painel anterior.
+
+Na janela principal, uma cópia de modelo de uma habilidade do Word transfere uma única vez o pedido e as etiquetas de habilidades para uma nova conversa partilhada. Se a ligação estiver bloqueada, o pedido fica ali como rascunho. As cópias em projetos usam o contexto do projeto original e são guardadas na respetiva pasta com um nome disponível após uma execução bem-sucedida. As pré-visualizações de modelos em branco e os anfitriões partilhados indisponíveis usam o painel habitual do editor.
+
 ## Abrir e usar
 
 - O painel precisa de uma IA conectada. Se não houver nenhuma, mostra os cartões de conexão em vez de um erro; consulte [Conexão por assinatura](help://subscription).

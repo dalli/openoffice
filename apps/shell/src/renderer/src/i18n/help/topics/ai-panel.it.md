@@ -2,6 +2,20 @@
 
 Ogni editor può richiamare il pannello IA: seleziona qualcosa, dai un'istruzione, guarda il risultato che arriva in streaming.
 
+## Assistente condiviso della finestra
+
+Apri il pannello condiviso con **Assistente IA** nella barra delle schede della finestra principale. All’inizio è chiuso. Crea o scegli una conversazione, poi il documento da modificare e gli ambiti di riferimento tra i documenti HWP/HWPX, DOCX/ODT o Markdown/testo aperti nella stessa finestra. Cambiare scheda o comprimere il pannello conserva le bozze e le attività in corso. **Interrompi** termina un’attività. Scrivere o cambiare conversazione non invia richieste. I pannelli IA degli editor restano disponibili.
+
+Per un documento Word come destinazione, Riassumi, Rivedi, Formatta e Mappa mentale compilano il campo di testo. Premi Invia per eseguire; la revisione usa il testo selezionato inizialmente, se presente. Le mappe restano nella loro conversazione e consentono di comprimere i rami e scaricare PNG/SVG. Un clic su un argomento prepara una domanda sulla stessa destinazione; se l’hai cambiata, seleziona prima il documento originale.
+
+Per un documento Word, il testo lungo appare durante la scrittura. Arresta nell’avanzamento della scrittura consente di conservare o scartare il testo parziale. Arresta accanto al campo di immissione termina l’intera esecuzione e rimuove la bozza incompleta. La scelta resta nella conversazione originale. Il testo completato o conservato può essere annullato con il comando per annullare questa esecuzione.
+
+Nella finestra principale, le azioni IA di Word dalla barra multifunzione, dai menu, da F7 e dal menu contestuale aprono una nuova conversazione condivisa con il documento e la selezione interessati. Le conferme e l’esecuzione immediata restano invariate; aprire o comprimere l’assistente mantiene la conversazione attuale. Le finestre separate o autonome, un host non ancora pronto usano il pannello precedente, accessibile dalla sua barra compressa.
+
+Nella finestra principale, aggiungere una modifica alla selezione di Word alla coda apre la conversazione condivisa del documento. La scheda permette di trovare i passaggi, modificare le istruzioni, rimuovere elementi o confermare lo svuotamento della coda. L’invio trasferisce il gruppo a una nuova conversazione condivisa; una connessione bloccata lo conserva come bozza. Un trasferimento fallito mantiene la coda e un documento modificato non usa le vecchie posizioni. Le finestre separate o autonome mantengono il pannello precedente.
+
+Nella finestra principale, una copia di modello di una competenza Word trasferisce una sola volta la richiesta e le etichette delle competenze a una nuova conversazione condivisa. Se la connessione è bloccata, la richiesta resta lì come bozza. Le copie nei progetti usano il contesto del progetto originale e vengono salvate nella sua cartella con un nome disponibile al termine di un’esecuzione riuscita. Le anteprime dei modelli vuoti e gli host condivisi non disponibili usano il pannello esistente dell’editor.
+
 ## Come aprirlo e usarlo
 
 - Il pannello ha bisogno di un'IA collegata. Se non ce n'è nessuna, mostra le schede di collegamento invece di un errore; vedi [Connessione con abbonamento](help://subscription).

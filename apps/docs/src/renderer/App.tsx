@@ -1,3 +1,5 @@
+import type { DocsWorkspaceAiEntry } from '../shared/workspace-ai-entry'
+import { routeDocsWorkspaceEntry } from './ai/workspace-entry'
 import { scriptFontHtml } from './editor/script-fonts'
 import { DOC_CSS_COMMITTED_EVENT } from './editor/cjk-punct-shrink'
 import { justifyShrinkPluginKey } from './editor/justify-shrink'
@@ -9,8 +11,12 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
-import type { CSSProperties, MouseEvent as ReactMouseEvent, SetStateAction } from 'react'
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
+import { DocsReviewStore } from './review-store'
+import { DocsLayoutStore } from './layout-store'
+import { createDocsLayoutAccess, effectiveLayoutSectPr } from './ai/layout-access'
 import { EditorContent, useEditor } from '@tiptap/react'
 import type { Editor } from '@tiptap/core'
 import { handleDocsControl, type ControlRequest } from './control'
@@ -62,14 +68,11 @@ import {
   BLANK_BULLET_NUM_ID,
   BLANK_ORDERED_NUM_ID,
   DEFAULT_SECTION,
-  applyPageNumType,
   customLevelFromNumberingLevel,
   applySectionSettings,
   applySectionStartType,
-  applyTitlePg,
   verifyProtectionPassword,
   type Block,
-  type CommentInfo,
   type CustomNumberingLevel,
   type NumberingDef,
   type DocProtection,
@@ -85,16 +88,11 @@ import {
   type SectionInfo,
   type SectionSettings,
   type SourceInfo,
-  pendingHeadingLevel,
   pictureWatermarkPreviewImage,
   previewFontSettings,
   type StyleInfo,
-  type StyleUpsert,
-  type DefaultFonts,
   type ThemeColors,
   type ThemeFonts,
-  type PictureWatermarkSpec,
-  type WatermarkSpec,
 } from '@genoffice/docx-engine'
 import type {
   AiDocContent,
@@ -113,12 +111,9 @@ import {
 import { ZoteroDocumentController } from './zotero/controller'
 import { AiPanel, AI_REVISION_AUTHOR } from './ai/AiPanel'
 import { useAiDock } from './ai/use-ai-dock'
-import type { AiCommentsAccess, AiDocExtras, AiHeaderFooterAccess } from './ai/tools'
-import type { AiStyleInfo } from './ai/style-ops'
-import { applyResolvedPageSetup, describeSection, type AiPageSetupAccess } from './ai/page-setup'
+import type { AiCommentsAccess } from './ai/tools'
 import { patchPendingSectPr, sectionIndexAtBlock } from './ai/pending-sections'
 import { protectedNoteMarkBlock, type AiNotesAccess } from './ai/note-ops'
-import { applyHfText, hfEditText } from './editor/hf-text'
 import {
   insertHfField,
   insertHfInstrField,
@@ -395,11 +390,8 @@ import { Ruler } from './components/Ruler'
 import { docBodyFont, docHasCjk, docLineFactor, docStyleCss, docThemeCss } from './doc-style-css'
 import { isDocDirty, runGuardedCandidate, runGuardedDocumentAction } from './doc-dirty'
 import {
-  EMPTY_HF_VARIANTS,
   restingHfAreaVariant,
   type DocState,
-  type HfVariantKey,
-  type HfVariantsState,
   type HfView,
   EMPTY_PENDING_NUMBERING,
   pendingNumberingDirty,
@@ -869,33 +861,67 @@ export function App() {
     },
     [docThemeDark],
   )
-  const [section, setSection] = useState<SectionSettings | null>(null)
-  /** All sections (readSections): pagination/preview use per-section geometry; layout edits apply to the cursor's section */
-  const [sections, setSections] = useState<SectionInfo[]>([])
-  const [sectionDirty, setSectionDirty] = useState(false)
   /** Index of the cursor's section (maintained by selectionUpdate) */
   const [activeSection, setActiveSection] = useState(0)
+  // Layout and style values share the pending stores used by save, recovery and both AI hosts.
+  const [layoutStore] = useState(() => new DocsLayoutStore())
+  const {
+    section,
+    sections,
+    sectionDirty,
+    sectionsDirty,
+    pageColor,
+    header,
+    footer,
+    hfVariants,
+    sectionHfEdits,
+    hfLinks,
+    titlePg,
+    titlePgDirty,
+    evenOddHf,
+    mirrorMargins,
+    pgNumEdit,
+    pgNumDirtySections,
+    styleUpserts,
+    defaultFonts,
+    watermark,
+    watermarkDirty,
+    watermarkPicture,
+  } = useSyncExternalStore(layoutStore.subscribe, layoutStore.getSnapshot, layoutStore.getSnapshot)
+  const {
+    setSection,
+    setSections,
+    setSectionDirty,
+    setSectionsDirty,
+    setTrailingStartType,
+    setPageColor,
+    setPageColorDirty,
+    setHeader,
+    setHeaderDirty,
+    setFooter,
+    setFooterDirty,
+    setHfVariants,
+    setHfVariantsDirty,
+    setSectionHfEdits,
+    setHfLinks,
+    setTitlePg,
+    setTitlePgDirty,
+    setEvenOddHf,
+    setEvenOddHfDirty,
+    setMirrorMargins,
+    setMirrorMarginsDirty,
+    setPgNumEdit,
+    setPgNumDirtySections,
+    setStyleUpserts,
+    setDefaultFonts,
+    setWatermark,
+    setWatermarkDirty,
+    setWatermarkStyle,
+    setWatermarkPicture,
+  } = layoutStore
   // displayed number of the caret's page: a mirrored document's ruler follows its parity
   const [caretPageNo, setCaretPageNo] = useState(1)
   const locateCaretPageRef = useRef<() => void>(() => {})
-  /** Indexes of edited non-final sections (their section-break paragraphs' sectPr is rewritten on save) */
-  const [sectionsDirty, setSectionsDirty] = useState<number[]>([])
-  /** Start type pending write to the trailing sectPr after inserting a continuous section break */
-  const [trailingStartType, setTrailingStartType] = useState<SectionInfo['startType'] | null>(null)
-  const [pageColor, setPageColor] = useState<string | null>(null)
-  const [pageColorDirty, setPageColorDirty] = useState(false)
-  const [header, setHeader] = useState<HeaderFooter | null>(null)
-  const [headerDirty, setHeaderDirty] = useState(false)
-  const [footer, setFooter] = useState<HeaderFooter | null>(null)
-  const [footerDirty, setFooterDirty] = useState(false)
-  const [hfVariants, setHfVariants] = useState<HfVariantsState>(EMPTY_HF_VARIANTS)
-  const [hfVariantsDirty, setHfVariantsDirty] = useState<HfVariantKey[]>([])
-  const [titlePg, setTitlePg] = useState(false)
-  const [titlePgDirty, setTitlePgDirty] = useState(false)
-  const [evenOddHf, setEvenOddHf] = useState(false)
-  const [evenOddHfDirty, setEvenOddHfDirty] = useState(false)
-  const [mirrorMargins, setMirrorMargins] = useState(false)
-  const [mirrorMarginsDirty, setMirrorMarginsDirty] = useState(false)
   const [pageInfo, setPageInfo] = useState({ current: 1, total: 1 })
   // last page's number for the document-end footer: text for the page marker, num for
   // even/odd parity (section restarts / pageNumberFmt make both differ from the physical count)
@@ -906,16 +932,10 @@ export function App() {
   )
   /** Page-number-format dialog + pending final-section pgNumType write (non-final sections rewrite sectPr via pgNumDirtySections) */
   const [pgNumModal, setPgNumModal] = useState<{ fmt: string; start: string } | null>(null)
-  const [pgNumEdit, setPgNumEdit] = useState<{ fmt?: string; start?: number } | null>(null)
-  const [pgNumDirtySections, setPgNumDirtySections] = useState<number[]>([])
   /** Pending numbering definitions to append (saved via SaveOptions.numbering; restart numbering / new list definitions) */
   const [pendingNumbering, setPendingNumbering] =
     useState<PendingNumbering>(EMPTY_PENDING_NUMBERING)
   const numberingDirty = pendingNumberingDirty(pendingNumbering)
-  /** Header/footer edits for non-final sections (key = `${lastBlockIndex}:${kind}`), saved via SaveOptions.sectionHf */
-  const [sectionHfEdits, setSectionHfEdits] = useState<Record<string, HeaderFooter>>({})
-  /** Link to Previous switched on for `${sectionIdx}:${kind}`: the section's own default reference goes on save */
-  const [hfLinks, setHfLinks] = useState<Record<string, true>>({})
   /** the strip whose editor is open (drives the contextual Header & Footer tab) */
   const [hfEditing, setHfEditing] = useState<{
     kind: 'header' | 'footer'
@@ -954,15 +974,6 @@ export function App() {
   const headerAreaView = areaView('header')
   const footerAreaView = areaView('footer')
 
-  /** the AI header/footer tool edits the strip the matching edge area shows */
-  const commitHf = (kind: 'header' | 'footer', next: HeaderFooter, viewOverride?: HfView) => {
-    commitHfAt(
-      kind === 'header' ? 0 : lastSectionIdx,
-      kind,
-      viewOverride ?? (kind === 'header' ? headerAreaView : footerAreaView),
-      next,
-    )
-  }
   /** "Different first page" toggle (ribbon checkbox); page 1's header/footer become the first-page variant, as in Word */
   const toggleTitlePg = (on: boolean) => {
     hfEditorRef.current?.exit()
@@ -1001,26 +1012,15 @@ export function App() {
   const [showComments, setShowComments] = useState(false)
   const [showStylesPane, setShowStylesPane] = useState(false)
   const [commentFocus, setCommentFocus] = useState<{ id: string; nonce: number } | null>(null)
-  /** Style definitions pending write-back (key = styleId), saved via SaveOptions.styleUpserts */
-  const [defaultFonts, setDefaultFonts] = useState<DefaultFonts>()
   const fontSettingsVersionRef = useRef(0)
   const fontSettingsPendingRef = useRef<Promise<void> | null>(null)
-  const [styleUpserts, setStyleUpserts] = useState<Record<string, StyleUpsert>>({})
-  const [comments, setCommentsState] = useState<CommentInfo[]>([])
-  // Synchronous mirror of the comments state: an agent turn can run several
-  // reply_comment calls with no render in between, and each id allocation
-  // must see the previous write (stale reads minted duplicate comment ids).
-  const commentsLiveRef = useRef<CommentInfo[]>([])
-  const setComments = useCallback((action: SetStateAction<CommentInfo[]>) => {
-    commentsLiveRef.current =
-      typeof action === 'function' ? action(commentsLiveRef.current) : action
-    setCommentsState(commentsLiveRef.current)
-  }, [])
-  const [commentsDirty, setCommentsDirty] = useState(false)
-  const [watermark, setWatermark] = useState<string | null>(null)
-  const [watermarkDirty, setWatermarkDirty] = useState(false)
-  const [watermarkStyle, setWatermarkStyle] = useState<Omit<WatermarkSpec, 'text'> | null>(null)
-  const [watermarkPicture, setWatermarkPicture] = useState<PictureWatermarkSpec | null>(null)
+  const [reviewStore] = useState(() => new DocsReviewStore())
+  const { comments, commentsDirty, footnotes, endnotes, notesDirty } = useSyncExternalStore(
+    reviewStore.subscribe,
+    reviewStore.getSnapshot,
+    reviewStore.getSnapshot,
+  )
+  const { setComments, setCommentsDirty, setFootnotes, setEndnotes, setNotesDirty } = reviewStore
   // the pending picture watermark as the header image it will parse back as,
   // sized against the last section's margin box like the save path
   const pendingWatermarkImage = useMemo(() => {
@@ -1042,13 +1042,10 @@ export function App() {
     color: 'FFFF00',
     width: 10,
   })
-  const [footnotes, setFootnotes] = useState<NoteInfo[]>([])
   /** Footnote ids already shown in canvas page gaps (the end-of-document list skips them to avoid duplication) */
   const [gapNoteIds, setGapNoteIds] = useState<Set<string>>(new Set())
-  const [endnotes, setEndnotes] = useState<NoteInfo[]>([])
   /** Endnote-area anchor: measured flow-end Y (layout px from the page-wrap top); null until measured */
   const [endnotesAreaTop, setEndnotesAreaTop] = useState<number | null>(null)
-  const [notesDirty, setNotesDirty] = useState(false)
   const [sources, setSources] = useState<SourceInfo[]>([])
   const [sourcesDirty, setSourcesDirty] = useState(false)
   const [zoteroDocumentData, setZoteroDocumentDataState] = useState('')
@@ -1118,6 +1115,25 @@ export function App() {
   useEffect(() => {
     setEditQueue([])
   }, [aiPanelKey])
+  const aiEntryDocument = useRef(aiPanelKey)
+  aiEntryDocument.current = tornDown ? -1 : aiPanelKey
+  const requestAiEntry = useCallback((entry: DocsWorkspaceAiEntry): void => {
+    const key = aiEntryDocument.current
+    if (key < 0) return
+    void routeDocsWorkspaceEntry(
+      window.desktop.workspaceAiEntry,
+      entry,
+      () => aiEntryDocument.current === key,
+      () => {
+        if (entry.kind === 'preset') {
+          setShowAi(true)
+          setAiPreset({ text: entry.text, autoRun: entry.autoRun, nonce: Date.now() })
+        } else if (entry.kind === 'open' || entry.kind === 'queue') setShowAi(true)
+        else setShowAi((value) => !value)
+      },
+      () => setShowAi(false),
+    )
+  }, [])
   const [docCss, setDocCss] = useState('')
   // Live CJK-ness of the body while editing; overrides docCss's --doc-line-factor
   const [liveDocCjk, setLiveDocCjk] = useState<boolean | null>(null)
@@ -2072,58 +2088,108 @@ export function App() {
     setReadMode,
     setLargeDocSpellOff,
     setShowPagePreview,
-    section,
-    sectionDirty,
-    sections,
-    sectionsDirty,
-    trailingStartType,
+    get section() {
+      return layoutStore.getSnapshot().section
+    },
+    get sectionDirty() {
+      return layoutStore.getSnapshot().sectionDirty
+    },
+    get sections() {
+      return layoutStore.getSnapshot().sections
+    },
+    get sectionsDirty() {
+      return layoutStore.getSnapshot().sectionsDirty
+    },
+    get trailingStartType() {
+      return layoutStore.getSnapshot().trailingStartType
+    },
     setSection,
     setSections,
     setSectionDirty,
     setSectionsDirty,
     setTrailingStartType,
-    pageColor,
-    pageColorDirty,
+    get pageColor() {
+      return layoutStore.getSnapshot().pageColor
+    },
+    get pageColorDirty() {
+      return layoutStore.getSnapshot().pageColorDirty
+    },
     setPageColor,
     setPageColorDirty,
-    header,
-    headerDirty,
-    footer,
-    footerDirty,
+    get header() {
+      return layoutStore.getSnapshot().header
+    },
+    get headerDirty() {
+      return layoutStore.getSnapshot().headerDirty
+    },
+    get footer() {
+      return layoutStore.getSnapshot().footer
+    },
+    get footerDirty() {
+      return layoutStore.getSnapshot().footerDirty
+    },
     setHeader,
     setHeaderDirty,
     setFooter,
     setFooterDirty,
-    hfVariants,
-    hfVariantsDirty,
+    get hfVariants() {
+      return layoutStore.getSnapshot().hfVariants
+    },
+    get hfVariantsDirty() {
+      return layoutStore.getSnapshot().hfVariantsDirty
+    },
     setHfVariants,
     setHfVariantsDirty,
-    sectionHfEdits,
+    get sectionHfEdits() {
+      return layoutStore.getSnapshot().sectionHfEdits
+    },
     setSectionHfEdits,
-    hfLinks,
+    get hfLinks() {
+      return layoutStore.getSnapshot().hfLinks
+    },
     setHfLinks,
-    titlePg,
-    titlePgDirty,
-    evenOddHf,
-    evenOddHfDirty,
+    get titlePg() {
+      return layoutStore.getSnapshot().titlePg
+    },
+    get titlePgDirty() {
+      return layoutStore.getSnapshot().titlePgDirty
+    },
+    get evenOddHf() {
+      return layoutStore.getSnapshot().evenOddHf
+    },
+    get evenOddHfDirty() {
+      return layoutStore.getSnapshot().evenOddHfDirty
+    },
     setTitlePg,
     setTitlePgDirty,
     setEvenOddHf,
     setEvenOddHfDirty,
-    mirrorMargins,
-    mirrorMarginsDirty,
+    get mirrorMargins() {
+      return layoutStore.getSnapshot().mirrorMargins
+    },
+    get mirrorMarginsDirty() {
+      return layoutStore.getSnapshot().mirrorMarginsDirty
+    },
     setMirrorMargins,
     setMirrorMarginsDirty,
-    pgNumEdit,
-    pgNumDirtySections,
+    get pgNumEdit() {
+      return layoutStore.getSnapshot().pgNumEdit
+    },
+    get pgNumDirtySections() {
+      return layoutStore.getSnapshot().pgNumDirtySections
+    },
     setPgNumEdit,
     setPgNumDirtySections,
     pendingNumbering,
     numberingDirty,
     setPendingNumbering,
-    styleUpserts,
+    get styleUpserts() {
+      return layoutStore.getSnapshot().styleUpserts
+    },
     setStyleUpserts,
-    defaultFonts,
+    get defaultFonts() {
+      return layoutStore.getSnapshot().defaultFonts
+    },
     setDefaultFonts,
     fontSettingsVersionRef,
     settleFontSettings: async () => {
@@ -2136,13 +2202,21 @@ export function App() {
     setCommentsDirty,
     setShowComments,
     setCommentComposing,
-    watermark,
-    watermarkDirty,
+    get watermark() {
+      return layoutStore.getSnapshot().watermark
+    },
+    get watermarkDirty() {
+      return layoutStore.getSnapshot().watermarkDirty
+    },
     setWatermark,
     setWatermarkDirty,
-    watermarkStyle,
+    get watermarkStyle() {
+      return layoutStore.getSnapshot().watermarkStyle
+    },
     setWatermarkStyle,
-    watermarkPicture,
+    get watermarkPicture() {
+      return layoutStore.getSnapshot().watermarkPicture
+    },
     setWatermarkPicture,
     inkAnnotations,
     inksDirty,
@@ -2461,31 +2535,15 @@ export function App() {
    * A section's sectPr as save would write it now: unsaved Layout-tab / AI edits
    * applied on top of the parsed XML (a break copies this, not the stale file bytes).
    */
-  const effectiveSectPrXml = (idx: number): string | null => {
-    const sec = sections[idx]
-    if (!sec) return null
-    if (sec.pendingBreak) return sec.sectPrXml
-    const isLast = idx === sections.length - 1
-    let xml = sec.sectPrXml
-    if (isLast ? sectionDirty : sectionsDirty.includes(idx)) {
-      xml = applySectionSettings(xml, (isLast && section) || sec.settings)
-      xml = applyTitlePg(xml, isLast ? titlePg : sec.titlePg)
-    } else if (isLast && titlePgDirty) {
-      xml = applyTitlePg(xml, titlePg)
-    }
-    if (isLast ? pgNumEdit !== null : pgNumDirtySections.includes(idx)) {
-      const pg = isLast ? pgNumEdit : { fmt: sec.pageNumberFmt, start: sec.pageNumberStart }
-      xml = applyPageNumType(xml, pg?.fmt, pg?.start)
-    }
-    return xml
-  }
+  const effectiveSectPrXml = (idx: number): string | null =>
+    effectiveLayoutSectPr(layoutStore.getSnapshot(), idx)
 
   const insertSectionBreak = useCallback(
     (
       type: SectionInfo['startType'],
       afterBlockIndex?: number,
       // the AI tool's own section mirror (fresh between renders) and the sectPr copy it chose
-      ai?: { sectPr: string; sections: SectionInfo[] },
+      ai?: { sectPr: string; sections: SectionInfo[]; deferSave?: boolean },
     ) => {
       if (!editor || !doc) return
       const pmDoc = editor.state.doc
@@ -2553,7 +2611,7 @@ export function App() {
         // parse-only start type (single-column: acts like next page); the UI never inserts it
         nextColumn: t('appBreakNextPage'),
       }
-      if (doc.filePath) {
+      if (doc.filePath && !ai?.deferSave) {
         pendingSectionSaveRef.current = true
         setStatus(t('appSectionBreakInserted', { type: labels[type] }))
       } else {
@@ -2864,7 +2922,7 @@ export function App() {
     }
     setPgNumModal(null)
     setStatus(t('appPgNumFormatSet'))
-  }, [pgNumModal, sections, activeSection])
+  }, [pgNumModal, sections, activeSection, setSections, setPgNumEdit, setPgNumDirtySections])
 
   const exportPdf = useCallback(
     (outPath?: string) => exportPdfImpl(fileCtxRef.current, outPath),
@@ -2988,7 +3046,7 @@ export function App() {
     // calls run several review actions between renders, and each one must
     // see the previous write (setComments replaces the array)
     get comments() {
-      return commentsLiveRef.current
+      return reviewStore.getSnapshot().comments
     },
     setComments,
     setCommentsDirty,
@@ -5504,9 +5562,8 @@ export function App() {
     )
       return
     localStorage.setItem(AI_REWRITE_ACK_KEY, '1')
-    setShowAi(true)
-    setAiPreset({ text: t('ribbonEditorPrompt'), nonce: Date.now(), autoRun: true })
-  }, [])
+    requestAiEntry({ kind: 'preset', text: t('ribbonEditorPrompt'), autoRun: true })
+  }, [requestAiEntry])
 
   // "has unsaved changes" check shared by the close guard and autosave; refreshed on every
   // render (all edit paths forceRender), so the guard's query reads the latest value
@@ -5881,7 +5938,7 @@ export function App() {
           zoomFit('multi')
           break
         case 'toggle-ai':
-          setShowAi((v) => !v)
+          requestAiEntry({ kind: 'toggle' })
           break
         case 'toggle-dark':
           updateDarkPage(!darkPageRef.current)
@@ -6043,6 +6100,7 @@ export function App() {
     openStats,
     startNewComment,
     runAiProofread,
+    requestAiEntry,
     toggleTableGridlines,
     tableSectionWidthPx,
     updateDarkPage,
@@ -6405,6 +6463,10 @@ export function App() {
     if (!parsed || upserts.length === 0) {
       liveStylesRef.current = null
       setLiveStyles(null)
+      if (parsed) {
+        editor.storage.listNumbering.styles = parsed.styles
+        setDocCss(docStyleCss(parsed))
+      }
       return
     }
     let cancelled = false
@@ -6461,6 +6523,7 @@ export function App() {
       .trim()
       .slice(0, 80)
     setEditQueue((queue) => [...queue, { qid, instruction, capturedText }])
+    requestAiEntry({ kind: 'queue' })
   }
   const queueUpdate = (qid: string, instruction: string): void =>
     setEditQueue((queue) => queue.map((i) => (i.qid === qid ? { ...i, instruction } : i)))
@@ -6518,21 +6581,11 @@ export function App() {
     [],
   )
 
-  // AI note tools: the lists mirror this render's writes so two inserts in one
-  // agent batch mint distinct ids before React state catches up
-  const aiNotesMirror = useRef<Record<'footnote' | 'endnote', NoteInfo[] | null>>({
-    footnote: null,
-    endnote: null,
-  })
-  useEffect(() => {
-    aiNotesMirror.current = { footnote: null, endnote: null }
-  }, [footnotes, endnotes])
+  // The review store is synchronous, so a batch sees its own note writes before a render.
   const aiNotesAccess = useMemo<AiNotesAccess>(() => {
     const list = (kind: 'footnote' | 'endnote') =>
-      aiNotesMirror.current[kind] ??
-      (kind === 'footnote' ? reviewCtxRef.current.footnotes : reviewCtxRef.current.endnotes)
+      reviewStore.getSnapshot()[kind === 'footnote' ? 'footnotes' : 'endnotes']
     const commit = (kind: 'footnote' | 'endnote', next: NoteInfo[]) => {
-      aiNotesMirror.current[kind] = next
       ;(kind === 'footnote' ? reviewCtxRef.current.setFootnotes : reviewCtxRef.current.setEndnotes)(
         next,
       )
@@ -6579,292 +6632,28 @@ export function App() {
         )
       },
     }
-  }, [])
+  }, [reviewStore])
 
   // AI header/footer tool: reads the live HF state and writes through the same
   // commit path as on-canvas editing (variant routing, per-section edits, dirty flags).
-  // The overlay mirrors this render's AI writes: an agent batch runs several tools
-  // between renders, so a read right after a set must not see the pre-write state
-  // (same pitfall as the comments id-minting ref mirror). Recreated per render,
-  // by which time React state has caught up.
-  const aiHfCtx = {
-    overlay: new Map<string, HeaderFooter>(),
-    valueOf(kind: 'header' | 'footer', view: HfView): HeaderFooter | null {
-      const pending = this.overlay.get(`${kind}:${view}`)
-      if (pending) return pending
-      return hfValueAt(kind === 'header' ? 0 : lastSectionIdx, kind, view)
-    },
-    commit: commitHf,
-    titlePg,
-    evenOddHf,
-    multiHf,
-    locked: isProtected || readMode,
-  }
-  const aiHfCtxRef = useRef(aiHfCtx)
-  aiHfCtxRef.current = aiHfCtx
-  // AI style / watermark tools read and write the same pending stores the save path drains.
-  // The upserts ref mirrors the state synchronously: an agent turn runs several style tools
-  // between renders, so a define_style followed by applyStyle must see the pending entry.
-  const aiStyleUpsertsRef = useRef(styleUpserts)
-  aiStyleUpsertsRef.current = styleUpserts
-  /** queue a style definition for the next save; shared by the AI tools and the Styles pane */
-  const upsertStyleDef = useCallback((up: StyleUpsert): string | null => {
-    const ctx = fileCtxRef.current
-    if (!ctx.doc) return 'no document is open'
-    const prev = aiStyleUpsertsRef.current[up.styleId]
-    const next = {
-      ...aiStyleUpsertsRef.current,
-      [up.styleId]: prev
-        ? {
-            ...prev,
-            ...up,
-            pPr: up.pPr || prev.pPr ? { ...prev.pPr, ...up.pPr } : undefined,
-            rPr: up.rPr || prev.rPr ? { ...prev.rPr, ...up.rPr } : undefined,
-          }
-        : up,
-    }
-    aiStyleUpsertsRef.current = next
-    ctx.setStyleUpserts(next)
-    return null
-  }, [])
-  const aiDocExtras = useMemo<AiDocExtras>(
-    () => ({
-      styles: {
-        list: () => {
-          const ctx = fileCtxRef.current
-          const out = new Map<string, AiStyleInfo>()
-          for (const s of ctx.doc?.parsed.styles.values() ?? []) {
-            if (s.linkedCharShell) continue
-            out.set(s.styleId, {
-              styleId: s.styleId,
-              name: s.name,
-              type: s.type,
-              ...(s.basedOn ? { basedOn: s.basedOn } : {}),
-              ...(s.headingLevel ? { headingLevel: s.headingLevel } : {}),
-            })
-          }
-          const upserts = aiStyleUpsertsRef.current
-          const parsed = (id: string) => ctx.doc?.parsed.styles.get(id)
-          for (const up of Object.values(upserts)) {
-            const cur = out.get(up.styleId)
-            const headingLevel = pendingHeadingLevel(up.styleId, (id) => upserts[id], parsed)
-            out.set(up.styleId, {
-              styleId: up.styleId,
-              name: up.name ?? cur?.name ?? up.styleId,
-              type: cur?.type ?? up.type ?? 'paragraph',
-              ...(up.basedOn === undefined
-                ? cur?.basedOn
-                  ? { basedOn: cur.basedOn }
-                  : {}
-                : up.basedOn
-                  ? { basedOn: up.basedOn }
-                  : {}),
-              ...(headingLevel ? { headingLevel } : {}),
-              pending: true,
-            })
-          }
-          return [...out.values()]
-        },
-        upsert: upsertStyleDef,
-      },
-      watermark: {
-        current: () => fileCtxRef.current.watermark,
-        set: (spec) => {
-          const ctx = fileCtxRef.current
-          if (!ctx.doc) return 'no document is open'
-          if (spec && 'image' in spec) {
-            ctx.setWatermark(null)
-            ctx.setWatermarkStyle(null)
-            ctx.setWatermarkPicture(spec)
-          } else if (spec) {
-            const { text, ...style } = spec
-            ctx.setWatermark(text)
-            ctx.setWatermarkStyle(Object.keys(style).length > 0 ? style : null)
-            ctx.setWatermarkPicture(null)
-          } else {
-            ctx.setWatermark(null)
-            ctx.setWatermarkStyle(null)
-            ctx.setWatermarkPicture(null)
-          }
-          ctx.setWatermarkDirty(true)
-          return null
-        },
-      },
-    }),
-    [upsertStyleDef],
+  const layoutContextRef = useRef({ locked: isProtected || readMode, delSectBreaks })
+  layoutContextRef.current = { locked: isProtected || readMode, delSectBreaks }
+  const layoutAccess = useMemo(
+    () =>
+      createDocsLayoutAccess({
+        store: layoutStore,
+        getContext: () => fileCtxRef.current,
+        isLocked: () => layoutContextRef.current.locked,
+        getDeletedBreaks: () => layoutContextRef.current.delSectBreaks,
+        insertBreak: (type, after, copy) => insertSectionBreakRef.current(type, after, copy),
+      }),
+    [layoutStore],
   )
-
-  const aiHfAccess = useMemo<AiHeaderFooterAccess>(
-    () => ({
-      read: () => {
-        const ctx = aiHfCtxRef.current
-        const textOf = (kind: 'header' | 'footer', view: HfView) => {
-          const value = ctx.valueOf(kind, view)
-          return value ? hfEditText(value) : ''
-        }
-        return {
-          header: textOf('header', 'default'),
-          footer: textOf('footer', 'default'),
-          headerFirst: ctx.titlePg ? textOf('header', 'first') : null,
-          footerFirst: ctx.titlePg ? textOf('footer', 'first') : null,
-          headerEven: ctx.evenOddHf ? textOf('header', 'even') : null,
-          footerEven: ctx.evenOddHf ? textOf('footer', 'even') : null,
-          titlePg: ctx.titlePg,
-          evenOddHf: ctx.evenOddHf,
-          multiSection: ctx.multiHf,
-        }
-      },
-      set: (kind, view, text) => {
-        const ctx = aiHfCtxRef.current
-        if (ctx.locked) return 'the document is read-only; headers/footers cannot be edited'
-        if (view === 'first' && !ctx.titlePg) {
-          setTitlePg(true)
-          setTitlePgDirty(true)
-          ctx.titlePg = true
-        }
-        if (view === 'even' && !ctx.evenOddHf) {
-          setEvenOddHf(true)
-          setEvenOddHfDirty(true)
-          ctx.evenOddHf = true
-        }
-        const next = applyHfText(ctx.valueOf(kind, view), text)
-        ctx.commit(kind, next, view)
-        ctx.overlay.set(`${kind}:${view}`, next)
-        return null
-      },
-    }),
-    [],
-  )
-
-  // AI page-setup tool: reads the live section list (block ranges in PM
-  // indexes) and writes through the Layout tab's paths. The mirror lets a
-  // batch of tool calls between renders see its own writes: `sections` as they
-  // stand after each call and the sectPr each would save to.
-  const aiPageCtx = {
-    sections: sections.map((s) => ({ ...s })),
-    effective: sections.map((_s, i) => effectiveSectPrXml(i) ?? ''),
-    locked: isProtected || readMode,
-    isBlank: !doc,
-  }
-  const aiPageCtxRef = useRef(aiPageCtx)
-  aiPageCtxRef.current = aiPageCtx
-  const aiPageSetupAccess = useMemo<AiPageSetupAccess>(
-    () => ({
-      list: () => {
-        const ctx = aiPageCtxRef.current
-        if (!editor || ctx.isBlank || ctx.sections.length === 0) return []
-        const pmDoc = editor.state.doc
-        const ranges = ctx.sections.map(() => ({ first: -1, last: -1 }))
-        for (let i = 0; i < pmDoc.childCount; i++) {
-          const r = ranges[sectionIndexAtBlock(pmDoc, ctx.sections, i)]!
-          if (r.first < 0) r.first = i
-          r.last = i
-        }
-        return ctx.sections.map((sec, i) =>
-          describeSection(sec, i, Math.max(ranges[i]!.first, 0), Math.max(ranges[i]!.last, 0)),
-        )
-      },
-      current: (index) => aiPageCtxRef.current.sections[index],
-      set: (index, resolved) => {
-        const ctx = aiPageCtxRef.current
-        if (ctx.locked) return 'the document is read-only; the page setup cannot be changed'
-        const sec = ctx.sections[index]
-        if (!sec || !editor) return `section ${index} does not exist`
-        const nextXml = applyResolvedPageSetup(ctx.effective[index] ?? sec.sectPrXml, resolved)
-        const next: SectionInfo = {
-          ...sec,
-          settings: resolved.settings,
-          titlePg: resolved.titlePg ?? sec.titlePg,
-          ...(resolved.pgNum
-            ? { pageNumberStart: resolved.pgNum.start, pageNumberFmt: resolved.pgNum.fmt }
-            : {}),
-        }
-        if (sec.pendingBreak) {
-          if (!patchPendingSectPr(editor, ctx.sections, index, nextXml))
-            return `section ${index} was removed from the document`
-          next.sectPrXml = nextXml
-        }
-        ctx.sections[index] = next
-        ctx.effective[index] = nextXml
-        setSections((prev) => prev.map((s, i) => (i === index ? next : s)))
-        if (sec.pendingBreak) return null
-        if (ctx.sections.length <= 1 || index === ctx.sections.length - 1) {
-          setSection(resolved.settings)
-          setSectionDirty(true)
-          if (resolved.titlePg !== undefined) {
-            setTitlePg(resolved.titlePg)
-            setTitlePgDirty(true)
-          }
-          if (resolved.pgNum) setPgNumEdit(resolved.pgNum)
-        } else {
-          setSectionsDirty((d) => (d.includes(index) ? d : [...d, index]))
-          if (resolved.pgNum) setPgNumDirtySections((d) => (d.includes(index) ? d : [...d, index]))
-        }
-        return null
-      },
-      insertBreak: (type, afterBlockIndex) => {
-        const ctx = aiPageCtxRef.current
-        if (ctx.locked) return 'the document is read-only; a section break cannot be inserted'
-        if (!editor || ctx.isBlank) return 'no document is open'
-        const pmDoc = editor.state.doc
-        const ownerIdx = sectionIndexAtBlock(pmDoc, ctx.sections, Math.max(afterBlockIndex, 0))
-        const owner = ctx.sections[ownerIdx]
-        const copyXml = ctx.effective[ownerIdx]
-        insertSectionBreakRef.current(
-          type,
-          afterBlockIndex,
-          copyXml ? { sectPr: copyXml, sections: ctx.sections } : undefined,
-        )
-        if (!owner || !copyXml) return null
-        // until the save re-reads the file, the new section is modelled here: it
-        // owns the blocks up to the break (by docxIndex), the owner keeps the rest
-        let lastDocx: number | null = null
-        for (let i = Math.min(afterBlockIndex, pmDoc.childCount - 1); i >= 0; i--) {
-          const di = pmDoc.child(i).attrs?.docxIndex as number | null | undefined
-          if (di !== null && di !== undefined) {
-            lastDocx = di
-            break
-          }
-        }
-        const created: SectionInfo = {
-          ...owner,
-          pendingBreak: true,
-          sectPrXml: copyXml,
-          lastBlockIndex: lastDocx ?? owner.firstBlockIndex - 1,
-        }
-        // the remainder starts with the chosen type; a pending owner's sectPr was
-        // patched in place by insertSectionBreak, the others get it written on save
-        const remainderXml = applySectionStartType(copyXml, type)
-        const ownerNext: SectionInfo = {
-          ...owner,
-          firstBlockIndex: created.lastBlockIndex + 1,
-          startType: type,
-          ...(owner.pendingBreak ? { sectPrXml: remainderXml } : {}),
-        }
-        ctx.sections.splice(ownerIdx, 0, created)
-        ctx.sections[ownerIdx + 1] = ownerNext
-        ctx.effective.splice(ownerIdx, 0, copyXml)
-        ctx.effective[ownerIdx + 1] = remainderXml
-        setSections((prev) => {
-          const next = [...prev]
-          next.splice(ownerIdx, 0, created)
-          if (next[ownerIdx + 1]) {
-            next[ownerIdx + 1] = {
-              ...next[ownerIdx + 1]!,
-              firstBlockIndex: ownerNext.firstBlockIndex,
-              startType: type,
-            }
-          }
-          return next
-        })
-        const shift = (d: number[]) => d.map((i) => (i >= ownerIdx ? i + 1 : i))
-        setSectionsDirty(shift)
-        setPgNumDirtySections(shift)
-        return null
-      },
-    }),
-    [editor],
-  )
+  const aiHfAccess = layoutAccess.hf
+  const aiDocExtras = layoutAccess.extras
+  const upsertStyleDef = aiDocExtras.styles!.upsert
+  const aiPageSetupAccess = useMemo(() => layoutAccess.pageSetup(), [layoutAccess])
+  const workspacePageSetupAccess = useMemo(() => layoutAccess.pageSetup(true), [layoutAccess])
 
   const ribbonActions = useStableCallbacks({
     allocateNumId: (kind: 'bullet' | 'ordered') => allocateListNumId(kind),
@@ -6888,7 +6677,7 @@ export function App() {
     onOpen: () => void openFile(),
     onSave: () => void save(false),
     onSaveAs: () => void save(true),
-    onToggleAi: () => setShowAi((v) => !v),
+    onToggleAi: () => requestAiEntry({ kind: 'toggle' }),
     onSection: (next: SectionSettings) => {
       // text columns are off in an ODT document
       const current = sections[activeSection]?.settings ?? section
@@ -6976,8 +6765,7 @@ export function App() {
     onDarkPage: updateDarkPage,
     onAiPreset: (text: string) => {
       // Word's Editor / Translate start working as soon as they're clicked
-      setShowAi(true)
-      setAiPreset({ text, nonce: Date.now(), autoRun: true })
+      requestAiEntry({ kind: 'preset', text, autoRun: true })
     },
     onHeader: (next: HeaderFooter) => commitHfAt(0, 'header', headerAreaView, next),
     onPageNumFormat: openPgNumModal,
@@ -7607,6 +7395,10 @@ export function App() {
               pageSetupAccess={aiPageSetupAccess}
               docExtras={aiDocExtras}
               notesAccess={aiNotesAccess}
+              reviewStore={reviewStore}
+              layoutStore={layoutStore}
+              workspacePageSetupAccess={workspacePageSetupAccess}
+              getLayoutBaseline={() => fileCtxRef.current.doc?.parsed}
               templateDocument={templateDocument}
               // a template copy whose run ended well goes into the panel's project (spec 6)
               onHandedRunDone={() => {
@@ -7614,6 +7406,15 @@ export function App() {
                 if (ctx.doc && !ctx.doc.filePath) {
                   void saveIntoProjectImpl(ctx, ctx.doc.fileName)
                 }
+              }}
+              onWorkspaceHandedRunDone={async (projectId, validate) => {
+                const ctx = fileCtxRef.current
+                if (!ctx.doc) return false
+                if (ctx.doc.filePath) return true
+                return saveIntoProjectImpl(ctx, ctx.doc.fileName, {
+                  expectedProjectId: projectId,
+                  validate,
+                })
               }}
             />
           </div>
@@ -8134,8 +7935,7 @@ export function App() {
           onViewImage={setViewImage}
           onSaveImageAs={saveImageAs}
           onAiPreset={(text) => {
-            setShowAi(true)
-            setAiPreset({ text, nonce: Date.now(), autoRun: true })
+            requestAiEntry({ kind: 'preset', text, autoRun: true })
           }}
           onRestartNumbering={restartNumbering}
           onContinueNumbering={continueNumbering}

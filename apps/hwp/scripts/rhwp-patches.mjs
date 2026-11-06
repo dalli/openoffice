@@ -1325,6 +1325,19 @@ export function patchTargets(name, file) {
  */
 export const pluginHooks = [
   {
+    file: 'src/engine/command.ts',
+    needles: ['this.type = `snapshot:${operationType}`', 'snapshotResourceCount(): number'],
+  },
+  {
+    file: 'src/engine/history.ts',
+    needles: [
+      'private undoStack: EditCommand[]',
+      'const BUDGET_HEADROOM = 2',
+      'peekUndoTop(): EditCommand | null',
+      'peekRedoTop(): EditCommand | null',
+    ],
+  },
+  {
     file: 'src/plugin/host.ts',
     needles: ['currentGeneration(): number', 'return this.deps.wasm.documentGeneration'],
   },
@@ -1368,12 +1381,14 @@ export const pluginHooks = [
     needles: [
       'getHeaderFooterParaInfo(sec: number, isHeader: boolean, applyTo: number, hfParaIdx: number): string',
       'getFootnoteInfo(sec: number, para: number, controlIdx: number)',
+      'snapshotCapacity(): number | null',
     ],
   },
   {
     file: 'src/engine/input-handler.ts',
     needles: [
       'private cursor: CursorState',
+      'private history: CommandHistory',
       'updateCaret(',
       'private virtualScroll: VirtualScroll',
       'private emitCursorFormatState(): void',

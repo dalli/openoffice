@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const ms = {
+  sendScope:
+    'Menghantar permintaan berkongsi kandungan dokumen untuk disunting serta skop rujukan, lampiran, kemahiran dan konteks projek yang anda pilih dengan AI terpilih.',
+  attachmentLimit: 'Lampirkan sehingga 20 fail bagi setiap mesej.',
+  polishPrompt:
+    'Perkemas penulisan dalam pilihan yang telah ditetapkan, atau seluruh dokumen jika tiada teks dipilih, supaya lebih jelas dan lancar.',
   conversation: 'Perbualan',
   newConversation: 'Perbualan baharu',
   target: 'Dokumen untuk disunting',

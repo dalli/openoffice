@@ -2,6 +2,20 @@
 
 Todos los editores pueden invocar el panel de IA: seleccione algo, dé una instrucción y vea el resultado en streaming.
 
+## Asistente compartido de la ventana
+
+Abra el panel compartido con **Asistente de IA** en la barra de pestañas de la ventana principal. Al principio está cerrado. Cree o elija una conversación y seleccione el documento que desea editar y los ámbitos de referencia entre los documentos HWP/HWPX, DOCX/ODT o Markdown/texto abiertos en esa ventana. Cambiar de pestaña o contraer el panel conserva los borradores y las tareas en curso. **Detener** finaliza una tarea. Escribir o cambiar de conversación no envía solicitudes. Los paneles de IA de los editores siguen disponibles.
+
+Si el destino es un documento de Word, Resumir, Mejorar, Formato y Mapa mental rellenan la entrada. Pulsa Enviar para ejecutar; Mejorar usa el texto seleccionado originalmente, si hay una selección. Los mapas permanecen en su conversación y permiten contraer ramas y descargar PNG/SVG. Al pulsar un tema se prepara una pregunta sobre el mismo destino; si cambiaste de destino, vuelve a seleccionar primero el documento original.
+
+Si el destino es un documento Word, el texto largo aparece mientras se escribe. Detener en el progreso de escritura permite conservar o descartar el texto parcial. Detener junto al campo de entrada termina toda la ejecución y elimina el borrador incompleto. La decisión permanece en la conversación original. El texto terminado o conservado se puede revertir con la opción de deshacer esta ejecución.
+
+En la ventana principal, las acciones de IA de Word desde la cinta, los menús, F7 y el menú contextual abren una nueva conversación compartida con el documento y la selección pulsados. Se conservan las confirmaciones y la ejecución inmediata; abrir o contraer el asistente mantiene la conversación actual. Las ventanas separadas o independientes, un anfitrión aún no preparado usan el panel anterior, accesible desde su barra contraída.
+
+En la ventana principal, añadir una edición de selección de Word a la cola abre la conversación compartida del documento. La tarjeta permite localizar pasajes, editar instrucciones, eliminar elementos o confirmar que se descarta toda la cola. Al enviar, el lote pasa a una nueva conversación compartida; si la conexión está bloqueada, queda como borrador. Un fallo de transferencia conserva la cola y un documento modificado no usa posiciones antiguas. Las ventanas separadas e independientes conservan el panel anterior.
+
+En la ventana principal, una copia de plantilla de una habilidad de Word transfiere una sola vez la solicitud y las etiquetas de habilidades a una nueva conversación compartida. Si la conexión está bloqueada, la solicitud queda allí como borrador. Las copias de proyectos usan el contexto de su proyecto original y se guardan en su carpeta con un nombre disponible tras completarse correctamente. Las vistas previas de plantillas en blanco y los anfitriones compartidos no disponibles usan el panel habitual del editor.
+
 ## Abrirlo y usarlo
 
 - El panel necesita una IA conectada. Si no hay ninguna, muestra las tarjetas de conexión en lugar de un error; vea [Conexión por suscripción](help://subscription).

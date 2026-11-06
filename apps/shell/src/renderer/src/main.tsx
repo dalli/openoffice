@@ -1,7 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { htmlDir, htmlLang, productName } from '@genoffice/i18n'
-import { AppFrame } from './AppFrame'
+import { WorkspaceAppFrame } from './workspace-ai/WorkspaceAppFrame'
 import { LocaleProvider } from './locale'
 import '@genoffice/ui/tokens.css'
 import '@genoffice/ui/screentip.css'
@@ -62,7 +62,7 @@ void Promise.all([
             <HelpScreen />
           </React.Suspense>
         ) : (
-          <AppFrame initialOnboardingSeen={onboardingSeen} />
+          <WorkspaceAppFrame initialOnboardingSeen={onboardingSeen} />
         )}
       </LocaleProvider>
     </React.StrictMode>,

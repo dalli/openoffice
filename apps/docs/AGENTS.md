@@ -13,7 +13,11 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 
 셸의 공용 작업 화면 기록 서비스도 `getProjectStore()`로 같은 인스턴스를 받는다. 별도 `ProjectStore`를 만들면 첫 답 전 버퍼와 seq가 나뉘므로 공유한다. 기존 문서 기록의 경로/파일 형식과 공용 프로젝트 IPC는 그대로다.
 
-공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문 도구·ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. PM 문서 변경은 내용 없는 변경 알림으로 메인에 전하며, 선택만 옮기는 일은 기존 범위를 바꾸지 않는다. 전용 preload와 `hostWorkspaceEditor`에 연결했으며, 아직 공용 패널이나 모델 실행은 이 경로를 부르지 않는다. 메모·각주·머리말·꼬리말 같은 별도 저장소와 긴 글 작성기·그림·파일·네트워크는 내놓지 않는다. `tests/workspace-adapter.test.ts`는 실제 합성 편집기에서 원래 도구와 결과·추적·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`가 빌드한 앱의 전용 통신을 확인한다.
+첨부 검증·읽기·그림·붙여넣기 임시 파일 함수는 메인에서 내보내 셸 공용 패널도 같은 구현을 쓴다. `ai/files-skill-core.ts`는 `read_attachment`의 목록·쪽 읽기 규약을 보관하고, 기존 `files-skill.ts`는 이 편집기의 다리와 번역을 주입한다. 셸은 실행에 묶인 다리를 주입하므로 편집기의 전역 `window.desktop`이나 언어 상태에 기대지 않는다.
+
+공용 작업 화면의 `ai/workspace-adapter.ts`는 기존 skill의 본문·메모·각주·미주 도구, ODT 거절·가린 현재 내용·캡처한 선택을 재사용한다. 기본 창의 공용 패널도 전용 preload와 `hostWorkspaceEditor`로 이 경로를 부른다. `review-store.ts`는 App의 메모·각주·미주 목록과 저장 표시를 동기적으로 소유하며 기존 검토 도구·저장·복구도 같은 목록을 쓴다. 본문 밖 목록의 변경도 문서 버전을 전진시키고 내용 없는 변경 알림으로 메인에 전한다. 해결 처리처럼 기존 도구가 `mutated: false`를 돌려주는 일도 실제 목록이 바뀌면 공용 실행에서는 변경으로 기록한다. 전체 되돌리기는 첫 쓰기 전 본문과 목록을 함께 잡고, 수동 변경 뒤에는 거절한다. 목록만 복원할 때 본문 실행 취소 기록은 만들지 않는다. 참고 읽기는 고른 본문/선택만 보내며 메모·주석 목록을 덧붙이지 않는다. 머리말·꼬리말·쪽 설정·스타일·워터마크는 `DocsLayoutStore`와 `ai/layout-access.ts`를 기존 AI 창·공용 패널·저장·복구가 함께 쓴다. 별도 상태 변경도 문서 버전에 반영하고 첫 쓰기 전 본문·검토·배치 상태를 함께 잡아 복원한다. 구역 나누기는 공용 패널에서 자동 저장을 예약하지 않는다. 저장으로 parsed 기준이 바뀌면 이전 되돌리기는 거절한다. 긴 글 작성기·그림·파일·네트워크는 아직 내놓지 않는다. `tests/workspace-adapter.test.ts`·`workspace-review.test.ts`·`workspace-layout.test.ts`가 실제 편집기에서 기존 도구와 결과·추적·가리기·저장·되돌리기를 비교하고, `e2e/workspace-editor-adapters.spec.ts`·`workspace-docs-review.spec.ts`·`workspace-docs-layout.spec.ts`가 빌드 앱의 전용 통신과 기본 패널을 확인한다.
+
+공용 패널의 `generate_mindmap`은 기존 순수 읽기 실행기로 제한된 나무를 만들며 문서 변경·되돌리기·저장을 만들지 않는다. `MindMapCardView`는 앱 전역 locale/preload 없이 언어를 받아 그리는 뷰이며, 기존 `MindMapCard`는 워드 언어를 주입하는 얇은 포장이다. 공용 패널은 접기·확대·PNG/SVG 내보내기와 같은 대상의 질문 채우기를 쓰며 문서 위치 이동·삽입은 제공하지 않는다. `ai/mind-map.css`는 두 호스트가 같은 스타일을 쓴다.
 
 ## 맡지 않는 것 (경계)
 
@@ -79,8 +83,21 @@ Word 문서(.docx)와 ODT(.odt) 에디터다. 그리고 배포되는 앱 전체�
 - ODT에서 꺼 둔 기능·잠금·이름표·붙여넣기: `tests/odt-gating.test.ts`.
 - ODT 열기·저장·다른 이름으로 저장·복구본: `tests/odt-open-save.test.ts`(실제 편집기와 가짜 뒷단), 뒷단 형식 규칙: `tests/odt-doc-format.test.ts`, 개체 그림 열쇠: `tests/odt-objects.test.ts`. 저장 경로를 바꾸면 "연속 두 번 저장"에서 고치지 않은 부분이 바이트 그대로인지 본다.
 - AI 배선에서 바꾸면 반드시 테스트하는 것(`tests/ai-run.test.ts`, `tests/ai-subscription-panel.test.ts`): 연결되지 않은 요청이 제공자를 부르지 않고 원인과 함께 거절되는지, 오류 조각에 원인 필드가 실리는지, 사용량·입력 축소가 전달되는지, 설정 읽기가 정규화되는지.
+- 공용 작업 패널의 `streamWorkspaceAi`는 등록된 기존 스트림 함수를 재사용하며 main이 읽은 설정과 실행별 중단 신호·조각 전달 함수를 받는다. 기존 `ai:stream`도 같은 함수를 쓴다. 셸의 `WorkspaceStreams`가 실행 소유권과 네이티브 대화 세션을 맡는다. 기본 창의 `WorkspaceAppFrame`도 같은 연결을 쓰며 `e2e/workspace-connection.spec.ts`가 PC 안 가짜 서버로 실제 메인 전송·사용량·중단을 확인한다.
 - `claude-code`·`codex` 제공자로 가는 테스트는 브리지를 반드시 mock한다. 안 하면 실제 프로그램이 떠서 개발자의 구독 사용량을 쓴다.
 - Windows에서 `tests/protect-dialog.test.ts`의 "setting a modify password…" 한 건은 변경과 무관하게 실패한다.
 - 실제 화면(쪽 나눔, 인쇄 결과, 어두운 쪽)은 단위 테스트로 다 확인되지 않는다. 빌드한 앱에서 확인한다.
 
 - `legacy-chat-events.ts`는 기존 `project:*`의 참조·추가·첫 저장 결과와 파일 이름 변경을 main 관찰자에 알린다. 본문·경로·모델 호출은 알림에 없고 관찰자 실패는 기존 기록 작업을 바꾸지 않는다. 셸은 이 알림으로 저장 전 문서 대화와 첫 저장 뒤 참조를 연결한다.
+
+공용 패널의 `template` 요청은 `AiPanel`이 넘긴 기존 `TemplateDocument`/`templateDocBytes`를 쓴다. `info`에는 바이트가 없고, 직접 누른 `preview`·`as-is`에서만 현재 편집 내용을 직렬화한다. 문서 인스턴스·본문/검토/배치 버전을 읽기 전후 검사하고, 가린 표시가 있으면 `as-is`를 읽기 전에 거절한다. 원본 저장·모델 호출·대화 기록은 만들지 않는다.
+
+공용 긴 글 작성기는 `ai/workspace-writer.ts`가 현재 `write_document` 호출의 출력만 받는다. 모델 전송·진행/부분 결과 선택은 셸이 맡고, 임시 초안과 최종 적용은 기존 `write_document`·`DraftLanding`이 맡는다. 초안 트랜잭션은 문서 버전과 보관된 선택을 움직이지 않으며, 최종 적용 직전에 문서·읽기 전용·중단을 다시 검사한다. 일반 트랜잭션의 선택 추적은 비동기 도구가 끝날 때까지 유지한다. 본문·표의 저장 바이트는 기존 작성기와 같고 전체 복원 뒤에도 쓰기 전 바이트와 같아야 한다. `doc-writer-request.ts`·`html-rules.ts`·`i18n/ai-language.ts`는 셸에서 가져오는 순수 브라우저 자원이다. 편집기나 preload 전역 형을 끌어오지 않는다.
+
+기본 창의 리본·메뉴·F7·오른쪽 클릭 AI 시작점은 `ai/workspace-entry.ts`와 선택적 `desktop.workspaceAiEntry`로 공용 호스트에 연결한다. 거절/독립/분리 창·선택 편집 대기열은 기존 패널을 쓰고, 수락한 요청은 다시 보내지 않는다. 문서 교체 뒤 늦은 응답은 버린다. 아직 이행하지 않은 기능·기존 초안을 위해 편집기 레일과 항상 장착된 AiPanel은 유지한다. `tests/workspace-entry.test.ts`, 셸 소유/호스트 시험과 `e2e/workspace-docs-entry.spec.ts`가 검사한다.
+
+선택 편집 대기열은 편집기가 소유하며 기본 창의 공용 카드도 같은 항목을 제어한다. 기본 창의 보내기는 `ai/workspace-edit-batch.ts`로 공용 새 대화에 넘긴다. 표식과 위치 계산은 편집기가 소유하며 현재 가리기 투영을 거친 발췌만 보낸다. 공용 대화 설치와 메인의 같은 문서·버전 확인이 끝난 뒤 인계 당시와 같은 항목만 소비한다. 실패·시간 초과·끊긴 응답은 대기열을 유지하고 로컬로 다시 보내지 않는다. 공용 호스트가 없는 독립/분리 창만 기존 실행을 쓴다. 인계 중 버튼의 중복 클릭을 막고, 문서 교체 뒤 늦은 답은 버린다. `tests/workspace-edit-batch.test.ts`와 `e2e/workspace-docs-edit-batch.spec.ts`가 검사한다.
+
+`ai/workspace-edit-queue.ts`는 공용 카드의 로컬 조작을 담당한다. 표식의 현재 가린 발췌·생존 여부와 일회 버전만 내주며, 사라진 표식의 `capturedText`는 내주지 않는다. 본문/대기열 버전이 바뀐 조작과 중복 보내기를 거절한다. `EditQueueCardView`와 `edit-queue.css`는 편집기 없는 뷰라 셸도 그대로 쓴다. 목록·행 수정·삭제·위치 찾기는 문서 저장이나 모델 요청을 만들지 않는다. 검사는 `workspace-edit-queue.test.ts`와 빌드 앱의 `workspace-docs-edit-batch.spec.ts`다.
+
+스킬 양식 사본의 `useSkillTemplates.takeHandoff`는 기존 채널을 그대로 쓴다. 셸 main이 DOCX/ODT 요청을 준비된 공용 대화에 인계한 경우 `null`로 답하므로 편집기 루프가 중복 실행하지 않는다. 프로젝트 사본의 첫 성공 실행은 비공개 `save-project-copy`로 기존 `saveIntoProject`를 부른다. 저장 직렬화 전후 문서 버전·읽기 전용·중단을 다시 확인하고 `expectedProjectId`를 main에 넘겨 다른 프로젝트 저장을 막는다. 저장 뒤 parsed 기준 교체는 기존대로 이전 전체 되돌리기를 거절한다. 양식 비우기 미리보기와 공용 호스트가 없는 창은 기존 응답·실행·완료 후 처리를 유지한다.

@@ -36,6 +36,8 @@ export const pt = {
   aiChipChartData: 'Atualizar os dados do gráfico',
   aiChipChartTitle: 'Alterar o título do gráfico',
   aiChipTableEdit: 'Ajustar linhas/colunas',
+  aiQueueTransferFailed:
+    'Não foi possível transferir as edições. A fila permanece intacta. Verifique o documento e envie novamente.',
   aiQueueTitle: 'Alterações na fila',
   aiQueueHint:
     'Clique numa linha para localizar o trecho; o envio aplica todas as alterações numa única solicitação',

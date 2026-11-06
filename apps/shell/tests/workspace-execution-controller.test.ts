@@ -35,7 +35,7 @@ const tool = (name = 'write', id = 'call-1'): AgentToolCall => ({
   input: { text: 'replacement' },
 })
 
-function fixture(timeoutMs = 10_000, panelGeneration = 1) {
+function fixture(timeoutMs = 10_000, panelGeneration = 1, writing = false) {
   const ipc = new EventEmitter()
   const owner = { windowId: 1, panelContentsId: 10, panelGeneration }
   const editors = new Map<string, ReturnType<typeof editor>>()
@@ -82,6 +82,7 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
     const gate = {
       write: null as ReturnType<typeof deferred> | null,
       prepare: null as ReturnType<typeof deferred> | null,
+      template: null as ReturnType<typeof deferred> | null,
     }
     const createSkill = vi.fn(async (captured: WorkspaceAdapterState): Promise<AgentSkill> => {
       if (gate.prepare) await gate.prepare.promise
@@ -90,13 +91,14 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
         id: tabId,
         systemPrompt: `instructions-${tabId}`,
         buildContext: () => body,
-        tools: ['read', 'write'].map((name) => ({
+        tools: ['read', 'write', ...(writing ? ['write_document'] : [])].map((name) => ({
           name,
           description: name,
           inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
         })),
         async executeTool(call, signal) {
-          if (call.name === 'write' && gate.write) await gate.write.promise
+          if ((call.name === 'write' || call.name === 'write_document') && gate.write)
+            await gate.write.promise
           if (signal?.aborted) throw new WorkspaceAdapterError('cancelled')
           if (expected !== String(revision)) throw new WorkspaceAdapterError('stale-document')
           if (call.name === 'read') return { output: body, summary: 'read' }
@@ -115,7 +117,20 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
       getState: state,
       read,
       createSkill,
-      toolAccess: { read: 'read', write: 'write' },
+      template: async (_state, mode) => {
+        if (gate.template) await gate.template.promise
+        return {
+          fileName: `${tabId}.docx`,
+          title: tabId,
+          redacted: false,
+          bytes: mode === 'info' ? null : new TextEncoder().encode(body),
+        }
+      },
+      toolAccess: {
+        read: 'read',
+        write: 'write',
+        ...(writing ? { write_document: 'write' as const } : {}),
+      },
       subscribeChanges: (handler) => {
         changes.add(handler)
         return () => {
@@ -123,6 +138,17 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
         }
       },
     })
+    const updateWriter = vi.fn(
+      async (_id: string, update: import('@genoffice/agent-core').WorkspaceWriterUpdate) => {
+        if (update.kind === 'result') gate.write?.resolve()
+      },
+    )
+    if (writing) adapter.updateWriter = updateWriter
+    const saveProjectCopy = vi.fn(async (_id: string, validate: () => Promise<void>) => {
+      await validate()
+      return true
+    })
+    const editQueue = vi.fn(async () => ({ version: 'queue-v1', items: [] }))
     const stop = hostWorkspaceEditor(
       workspaceEditorPort({
         on: (channel, listener) => renderer.on(channel, listener),
@@ -138,6 +164,8 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
         },
       }),
       adapter,
+      undefined,
+      { editQueue, saveProjectCopy, subscribe: () => () => {} },
     )
     const client = new WorkspaceEditorConnection(
       view as unknown as WebContents,
@@ -147,6 +175,9 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
     )
     const document = {
       client,
+      editQueue,
+      saveProjectCopy,
+      updateWriter,
       read,
       writes,
       createSkill,
@@ -202,6 +233,119 @@ function fixture(timeoutMs = 10_000, panelGeneration = 1) {
 }
 
 describe('workspace registry and live editor coordination', () => {
+  it('binds edit batches to the exact source version with no visible selection and no body read', async () => {
+    const f = fixture()
+    const state = f.b.state()
+    const expected = { documentId: state.instanceId, revision: state.revision }
+    const capture = await f.controller.captureEditBatch('b', expected)
+    expect(capture.binding.selection).toBeNull()
+    expect(f.b.read).not.toHaveBeenCalled()
+    const run = f.enqueue(capture.id)
+    expect((await f.controller.startNext())!.target.state.selectionId).toBeNull()
+    await f.controller.cancel(run)
+    f.b.manual()
+    await expect(f.controller.captureEditBatch('b', expected)).rejects.toMatchObject({
+      kind: 'document-changed',
+    })
+    const now = f.b.state()
+    f.b.lock()
+    await expect(
+      f.controller.captureEditBatch('b', { documentId: now.instanceId, revision: now.revision }),
+    ).rejects.toMatchObject({ kind: 'document-changed' })
+  })
+  it('routes writer updates only to the active call and rejects copied owner/conversation handles', async () => {
+    const f = fixture(10_000, 1, true)
+    const target = await f.controller.capture('b')
+    const bound = f.enqueue(target.id)
+    await f.controller.startNext()
+    await expect(
+      f.controller.updateWriter(bound, 'writer', { kind: 'ready' }),
+    ).rejects.toMatchObject({ kind: 'invalid-request' })
+    f.b.gate.write = deferred()
+    const executing = f.controller.execute(
+      bound,
+      bound.target.document,
+      tool('write_document', 'writer'),
+    )
+    await f.controller.updateWriter(bound, 'writer', { kind: 'ready' })
+    for (const handle of [
+      { ...bound, conversationId: 'other-conversation' },
+      { ...bound, owner: { ...bound.owner, panelGeneration: 2 } },
+    ])
+      await expect(
+        f.controller.updateWriter(handle, 'writer', { kind: 'progress', text: 'wrong' }),
+      ).rejects.toThrow()
+    await expect(
+      f.controller.updateWriter(bound, 'wrong-call', { kind: 'result', ok: true, text: 'wrong' }),
+    ).rejects.toMatchObject({ kind: 'invalid-request' })
+    expect(f.a.updateWriter).not.toHaveBeenCalled()
+    expect(f.c.updateWriter).not.toHaveBeenCalled()
+    await f.controller.updateWriter(bound, 'writer', { kind: 'progress', text: 'live' })
+    await f.controller.updateWriter(bound, 'writer', { kind: 'result', ok: true, text: 'complete' })
+    expect((await executing).result.mutated).toBe(true)
+    expect(f.b.updateWriter).toHaveBeenCalledTimes(3)
+    await expect(
+      f.controller.updateWriter(bound, 'writer', { kind: 'progress', text: 'late' }),
+    ).rejects.toMatchObject({ kind: 'invalid-request' })
+  })
+  it('pins template reads to the original target, rejects replacements and discards mid-export changes', async () => {
+    const f = fixture()
+    const a = await f.controller.capture('a')
+    expect(await f.controller.template(a.binding.document, 'preview')).toMatchObject({
+      fileName: 'a.docx',
+      bytes: new TextEncoder().encode('a UNSAVED'),
+    })
+    await expect(
+      f.controller.template({ ...a.binding.document, windowId: 2 }, 'preview'),
+    ).rejects.toMatchObject({ kind: 'wrong-owner' })
+    f.a.gate.template = deferred()
+    const reading = f.controller.template(a.binding.document, 'preview')
+    await vi.waitFor(() =>
+      expect(
+        f.a.view.send.mock.calls.some(
+          ([, value]) => (value as WorkspaceEditorRequest)?.operation?.kind === 'template',
+        ),
+      ).toBe(true),
+    )
+    await new Promise((done) => setTimeout(done, 0))
+    f.a.manual()
+    f.a.gate.template.resolve()
+    await expect(reading).rejects.toMatchObject({ kind: 'document-changed' })
+    f.a.reload()
+    await expect(f.controller.template(a.binding.document, 'info')).rejects.toMatchObject({
+      kind: 'document-changed',
+    })
+  })
+  it('renews the pinned selection without reading content, and rejects a replaced document', async () => {
+    const f = fixture()
+    const original = await f.controller.capture('b')
+    f.b.caret()
+    const renewed = await f.controller.refresh(original.id)
+    expect(renewed.binding).toEqual(original.binding)
+    expect(renewed.id).not.toBe(original.id)
+    expect(f.b.read).not.toHaveBeenCalled()
+    expect(f.b.createSkill).not.toHaveBeenCalled()
+    f.b.reload()
+    await expect(f.controller.refresh(renewed.id)).rejects.toMatchObject({
+      kind: 'editor-replaced',
+    })
+    expect(f.b.writes).not.toHaveBeenCalled()
+  })
+
+  it('does not renew an already queued binding when a later target capture is refreshed', async () => {
+    const f = fixture()
+    const pinned = await f.controller.capture('b')
+    f.enqueue(pinned.id)
+    f.b.manual()
+    await vi.waitFor(() => expect(f.controller.state('P')).toMatchObject({ status: 'stopped' }))
+    const latest = await f.controller.capture('b')
+    const renewed = await f.controller.refresh(latest.id)
+    expect(renewed.binding.revision).not.toBe(pinned.binding.revision)
+    expect(f.controller.state('P')).toMatchObject({ status: 'stopped', reason: 'document-changed' })
+    expect(await f.controller.startNext()).toBeNull()
+    expect(f.b.createSkill).not.toHaveBeenCalled()
+  })
+
   it('does not accept an old panel handle when a new generation reuses the run and binding ids', async () => {
     const previous = fixture()
     const old = previous.enqueue((await previous.controller.capture('b')).id)
@@ -438,4 +582,136 @@ describe('workspace registry and live editor coordination', () => {
     })
     expect(host.b.writes).not.toHaveBeenCalled()
   })
+})
+
+describe('main-owned queue controls', () => {
+  it('routes only to the original document and rejects other windows, generations and active runs', async () => {
+    const f = fixture()
+    const target = await f.controller.capture('b')
+    const doc = target.binding.document
+    expect(await f.controller.editQueue(doc, { kind: 'list' })).toEqual({
+      version: 'queue-v1',
+      items: [],
+    })
+    expect(f.b.editQueue).toHaveBeenCalledOnce()
+    expect(f.a.editQueue).not.toHaveBeenCalled()
+    await expect(
+      f.controller.editQueue({ ...doc, windowId: 2 }, { kind: 'list' }),
+    ).rejects.toMatchObject({ kind: 'wrong-owner' })
+    await expect(
+      f.controller.editQueue({ ...doc, generation: 999 }, { kind: 'clear', version: 'queue-v1' }),
+    ).rejects.toMatchObject({ kind: 'editor-replaced' })
+    const fresh = await f.controller.capture('b')
+    f.controller.enqueue({
+      conversationId: 'P',
+      runId: 'run',
+      targetId: fresh.id,
+      referenceIds: [],
+      project: null,
+    })
+    await f.controller.startNext()
+    await expect(
+      f.controller.editQueue(doc, { kind: 'send', version: 'queue-v1' }),
+    ).rejects.toMatchObject({ kind: 'call-in-flight' })
+    expect(f.b.editQueue).toHaveBeenCalledOnce()
+  })
+})
+
+describe('queue snapshot lifetime', () => {
+  it('keeps the original conversation capture after many card refreshes', async () => {
+    const f = fixture()
+    const capture = await f.controller.capture('b')
+    for (let i = 0; i < 140; i++)
+      await f.controller.editQueue(capture.binding.document, { kind: 'list' })
+    expect(await f.controller.refresh(capture.id)).toMatchObject({ binding: capture.binding })
+  })
+})
+
+describe('project copy completion', () => {
+  it('saves only after a matching successful run is settled and never completes twice', async () => {
+    const f = fixture()
+    const target = await f.controller.capture('b')
+    const run = f.controller.enqueue({
+      conversationId: 'project-chat',
+      runId: 'project-run',
+      targetId: target.id,
+      referenceIds: [],
+      project: { id: 'project-one', contextVersion: 'context-one' },
+    })
+    await f.controller.startNext()
+    await f.controller.execute(run, run.target.document, tool())
+    await expect(f.controller.completeProjectCopy(run, 'other-project')).rejects.toMatchObject({
+      kind: 'invalid-request',
+    })
+    expect(f.b.saveProjectCopy).not.toHaveBeenCalled()
+    await f.controller.completeProjectCopy(run, 'project-one')
+    expect(f.b.saveProjectCopy).toHaveBeenCalledOnce()
+    expect(f.b.saveProjectCopy).toHaveBeenCalledWith('project-one', expect.any(Function))
+    await expect(f.controller.completeProjectCopy(run, 'project-one')).rejects.toBeDefined()
+    expect(f.b.saveProjectCopy).toHaveBeenCalledOnce()
+  })
+  it.each(['cancel', 'change'] as const)('does not save a run after %s', async (reason) => {
+    const f = fixture()
+    const target = await f.controller.capture('b')
+    const run = f.controller.enqueue({
+      conversationId: 'project-chat',
+      runId: 'project-run',
+      targetId: target.id,
+      referenceIds: [],
+      project: { id: 'project-one', contextVersion: 'context-one' },
+    })
+    await f.controller.startNext()
+    if (reason === 'cancel') f.controller.cancel(run)
+    else f.b.manual()
+    await expect(f.controller.completeProjectCopy(run, 'project-one')).rejects.toBeDefined()
+    expect(f.b.saveProjectCopy).not.toHaveBeenCalled()
+  })
+})
+
+it('holds the next workspace run until a project copy save settles and cancels its late write', async () => {
+  const f = fixture()
+  const target = await f.controller.capture('b')
+  const later = await f.controller.capture('c')
+  const run = f.controller.enqueue({
+    conversationId: 'copy-chat',
+    runId: 'copy-run',
+    targetId: target.id,
+    referenceIds: [],
+    project: { id: 'project-one', contextVersion: 'context-one' },
+  })
+  await f.controller.startNext()
+  const waiting = deferred()
+  const written = vi.fn()
+  f.b.saveProjectCopy.mockImplementationOnce(async (_id, validate) => {
+    await waiting.promise
+    await validate()
+    written()
+    return true
+  })
+  const finishing = f.controller.completeProjectCopy(run, 'project-one')
+  const result = expect(finishing).rejects.toMatchObject({ kind: 'cancelled' })
+  await vi.waitFor(() => expect(f.b.saveProjectCopy).toHaveBeenCalledOnce())
+  f.controller.enqueue({
+    conversationId: 'later-chat',
+    runId: 'later-run',
+    targetId: later.id,
+    referenceIds: [],
+    project: null,
+  })
+  expect(await f.controller.startNext()).toBeNull()
+  f.controller.cancel(run)
+  let settled = false
+  void finishing
+    .catch(() => {})
+    .finally(() => {
+      settled = true
+    })
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  expect(settled).toBe(false)
+  expect(await f.controller.startNext()).toBeNull()
+  waiting.resolve()
+  await result
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  expect(written).not.toHaveBeenCalled()
+  expect((await f.controller.startNext())?.binding.runId).toBe('later-run')
 })

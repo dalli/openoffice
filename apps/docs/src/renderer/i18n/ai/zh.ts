@@ -33,6 +33,7 @@ export const zh = {
   aiChipChartData: '更新图表数据',
   aiChipChartTitle: '修改图表标题',
   aiChipTableEdit: '调整行列',
+  aiQueueTransferFailed: '无法转交编辑请求。队列未更改。请检查文档后重新发送。',
   aiQueueTitle: '待发送的修改',
   aiQueueHint: '点击条目可定位原文;发送时所有修改合并为一次请求',
   aiQueueSend: '发送 {count} 条修改',

@@ -27,7 +27,9 @@ const GUIDE = '이곳을 마우스로 누르고 내용을 입력하세요.'
  * A small document built with the engine itself:
  *   제목 / 첫째 문단입니다. / 둘째 문단입니다. / [2×2 table: 구분 내용 대상 업체] / 끝 문단입니다.
  */
-function openEditor(options: { fields?: boolean; endsWithTable?: boolean } = {}) {
+function openEditor(
+  options: { fields?: boolean; endsWithTable?: boolean; nativeHistory?: boolean } = {},
+) {
   let generation = 1
   let doc = HwpDocument.createEmpty()
   doc.createBlankDocument()
@@ -58,32 +60,62 @@ function openEditor(options: { fields?: boolean; endsWithTable?: boolean } = {})
     doc.insertClickHereField(0, at + 3, 5, GUIDE, '', '', true)
   }
 
-  const history: Uint8Array[] = []
+  const history: { type: string; before: Uint8Array | number; snapshotResourceCount(): number }[] =
+    []
+  const redo: typeof history = []
+  const commandHistory = {
+    undoStack: history,
+    peekUndoTop: () => history.at(-1) ?? null,
+    peekRedoTop: () => redo.at(-1) ?? null,
+  }
+  const commands = new Map<string, { execute(services: unknown): void }>()
   const listeners: (() => void)[] = []
   const emit = () => listeners.forEach((listener) => listener())
   const host = {
     currentGeneration: () => generation,
     read: (fn: (d: never) => unknown) => fn(doc as never),
-    transaction: (_label: string, fn: (tx: never) => unknown) => {
-      const before = doc.exportHwp()
+    transaction: (label: string, fn: (tx: never) => unknown) => {
+      const before = options.nativeHistory ? doc.saveSnapshot() : doc.exportHwp()
       try {
         const result = fn({ doc: () => doc, deferPagination: () => {} } as never)
-        history.push(before)
+        history.push({
+          type: `snapshot:plugin:ieum-agent:${label}`,
+          before,
+          snapshotResourceCount: () => 1,
+        })
         emit()
         return result
       } catch (thrown) {
-        doc = new HwpDocument(before)
+        if (typeof before === 'number') {
+          doc.restoreSnapshot(before)
+          doc.discardSnapshot(before)
+        } else doc = new HwpDocument(before)
         throw thrown
       }
     },
     events: { on: (_name: string, handler: () => void) => listeners.push(handler) },
     automation: {
+      registerCommand: (command: { id: string; execute(services: unknown): void }) =>
+        commands.set(command.id, command),
+      getContext: () => ({ isEditable: true, isFormMode: false }),
       // the editor's undo; other commands (the plugin's own) do nothing here
       execute: (command: string) => {
-        if (command !== 'edit:undo') return null
+        if (command !== 'edit:undo') {
+          // Only the history command needs real services in this engine fixture.
+          if (command === 'ext:ieum-workspace-history')
+            commands.get(command)?.execute({
+              getInputHandler: () => ({ history: commandHistory }),
+              wasm: { snapshotCapacity: () => doc.snapshotCapacity() },
+            })
+          return { ok: true }
+        }
         const before = history.pop()
         if (!before) return { ok: false }
-        doc = new HwpDocument(before)
+        redo.push(before)
+        if (typeof before.before === 'number') {
+          doc.restoreSnapshot(before.before)
+          doc.discardSnapshot(before.before)
+        } else doc = new HwpDocument(before.before)
         emit()
         return { ok: true }
       },
@@ -147,6 +179,68 @@ const ORIGINAL = [
 ]
 
 describe('the document the tests work on', () => {
+  it('bounds and releases private checkpoints without changing the document or undo history', () => {
+    const editor = openEditor({ nativeHistory: true })
+    const state = editor.plugin.workspaceState()
+    const checkpoints = Array.from({ length: 17 }, () =>
+      editor.plugin.workspaceCaptureRollback(state),
+    )
+    expect(checkpoints.every((checkpoint) => checkpoint.ok)).toBe(true)
+    const first = checkpoints[0]!
+    const last = checkpoints.at(-1)!
+    if (!first.ok || !last.ok) throw new Error('No checkpoints')
+    editor.plugin.replaceText('첫째 문단', '고친 문단')
+    const after = editor.plugin.workspaceState()
+    expect(editor.plugin.workspaceRollback(after, first.id)).toMatchObject({ ok: false })
+    expect(editor.steps()).toBe(1)
+    editor.plugin.workspaceReleaseRollback(last.id)
+    expect(editor.plugin.workspaceRollback(after, last.id)).toMatchObject({ ok: false })
+    expect(editor.steps()).toBe(1)
+    expect(editor.lines()).toContain('고친 문단입니다.')
+  })
+  it('undoes a complete workspace run without discarding pre-run edits or changing saved bytes', async () => {
+    const editor = openEditor({ nativeHistory: true })
+    editor.plugin.replaceText('제목', '이전 작업 제목')
+    const originalHwp = editor.doc().exportHwp()
+    const originalHwpx = editor.doc().exportHwpx()
+    const adapter = createHwpWorkspaceAdapter({
+      bridge: new Proxy({} as AgentBridge, {
+        get:
+          (_target, method: keyof AgentBridge) =>
+          async (...args: unknown[]) =>
+            (editor.plugin[method] as (...values: unknown[]) => unknown)(...args),
+      }),
+      label: (key) => key,
+      onChange: () => {},
+      confirmMemoRemoval: async () => false,
+    })
+    const session = await adapter.prepare({
+      runId: 'all',
+      mode: 'edit',
+      state: await adapter.capture(),
+    })
+    await session.execute({
+      id: 'first',
+      name: 'replace_text',
+      input: { find: '첫째 문단', replace: '고친 문단' },
+    })
+    await session.execute({
+      id: 'second',
+      name: 'fill_cells',
+      input: { table: 1, cells: [{ row: 2, col: 2, text: '고친 칸' }], overwrite: true },
+    })
+    expect(editor.lines()).toContain('고친 문단입니다.')
+    expect(editor.lines()).toContain('고친 칸')
+    const last = session.state
+    session.release()
+    await adapter.rollback!(session.rollbackId!, last)
+    expect(editor.steps()).toBe(1)
+    expect(editor.doc().exportHwp()).toEqual(originalHwp)
+    expect(editor.doc().exportHwpx()).toEqual(originalHwpx)
+    expect(editor.lines()).toContain('이전 작업 제목')
+    expect(editor.plugin.undo(1, 0)).toMatchObject({ ok: true })
+    expect(editor.lines()).toEqual(ORIGINAL)
+  })
   it('reads as its paragraphs and table cells in order', () => {
     const editor = openEditor()
     expect(editor.lines()).toEqual(ORIGINAL)

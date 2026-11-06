@@ -2,6 +2,20 @@
 
 Setiap editor boleh memanggil panel AI. Pilih sesuatu, berikan arahan, dan lihat hasilnya dipaparkan secara berperingkat.
 
+## Pembantu bersama tetingkap
+
+Buka panel bersama melalui **Pembantu AI** pada bar tab tetingkap utama. Pada mulanya panel ditutup. Cipta atau pilih perbualan, kemudian pilih dokumen untuk disunting dan skop rujukan daripada dokumen HWP/HWPX, DOCX/ODT atau Markdown/teks yang dibuka dalam tetingkap yang sama. Menukar tab atau meruntuhkan panel mengekalkan draf dan tugas yang sedang berjalan. **Hentikan** menamatkan tugas. Menaip atau menukar perbualan tidak menghantar permintaan. Panel AI penyunting sedia ada masih tersedia.
+
+Apabila sasaran ialah dokumen Word, butang Ringkaskan, Perkemas, Format dan Peta minda mengisi ruangan permintaan. Tekan Hantar untuk menjalankannya; Perkemas menggunakan teks yang dipilih pada awalnya jika ada pilihan. Peta kekal dalam perbualannya dan membolehkan cabang dilipat serta PNG/SVG dimuat turun. Mengklik topik menyediakan soalan tentang sasaran yang sama; jika sasaran berubah, pilih semula dokumen asal terlebih dahulu.
+
+Untuk dokumen Word, tulisan panjang muncul semasa ditulis. Henti pada kemajuan penulisan membolehkan anda menyimpan atau membuang teks separa. Henti di sebelah ruang input menamatkan seluruh proses dan membuang draf yang belum siap. Pilihan kekal dalam perbualan asal. Tulisan yang siap atau disimpan boleh dikembalikan melalui tindakan buat asal proses ini.
+
+Dalam tetingkap utama, tindakan AI Word daripada reben, menu, F7 dan menu klik kanan membuka perbualan bersama baharu dengan dokumen dan pilihan yang diklik. Pengesahan dan pelaksanaan segera dikekalkan; membuka atau meruntuhkan pembantu mengekalkan perbualan semasa. Tetingkap berasingan atau kendiri, hos yang belum sedia menggunakan panel lama. Panel itu masih boleh dibuka melalui bar yang diruntuhkan.
+
+Dalam tetingkap utama, menambah suntingan pilihan Word ke baris gilir membuka perbualan bersama dokumen itu. Kad membolehkan anda mencari petikan, menyunting arahan, membuang item atau mengesahkan pengosongan baris gilir. Penghantaran memindahkan kelompok ke perbualan bersama baharu; sambungan yang disekat menyimpan permintaan sebagai draf. Pemindahan yang gagal mengekalkan baris gilir dan dokumen yang berubah tidak menggunakan kedudukan lama. Tetingkap berasingan dan kendiri masih menggunakan panel lama.
+
+Dalam tetingkap utama, salinan templat kemahiran Word memindahkan permintaan dan cip kemahirannya sekali ke perbualan bersama baharu. Jika sambungan disekat, permintaan kekal sebagai draf di situ. Salinan projek menggunakan konteks projek asal dan disimpan dalam folder tersebut dengan nama yang belum digunakan selepas pelaksanaan berjaya. Pratonton templat kosong dan hos bersama yang tidak tersedia menggunakan panel penyunting sedia ada.
+
 ## Membuka dan menggunakannya
 
 - Panel ini memerlukan AI yang disambungkan. Jika tiada AI disambungkan, panel memaparkan kad sambungan dan bukannya ralat; lihat [Sambungan langganan](help://subscription).

@@ -1,4 +1,8 @@
 export const zh = {
+  sendScope:
+    '发送请求时，编辑目标的内容以及您选择的参考范围、附件、技能和项目上下文将发送给所选 AI。',
+  attachmentLimit: '每条消息最多可附加 20 个文件。',
+  polishPrompt: '请润色已固定的选区；如果没有选中文字，则润色整篇文档，使表达更清晰流畅。',
   conversation: '对话',
   newConversation: '新建对话',
   target: '修改对象',

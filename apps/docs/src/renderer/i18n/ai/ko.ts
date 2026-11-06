@@ -34,6 +34,8 @@ export const ko = {
   aiChipChartData: '차트 데이터 업데이트',
   aiChipChartTitle: '차트 제목 변경',
   aiChipTableEdit: '행/열 조정',
+  aiQueueTransferFailed:
+    '편집 요청을 옮기지 못했습니다. 대기열은 그대로입니다. 문서를 확인한 뒤 다시 보내세요.',
   aiQueueTitle: '보낼 수정 목록',
   aiQueueHint:
     '항목을 클릭하면 본문 위치로 이동합니다. 보내면 모든 수정이 한 번의 요청으로 적용됩니다',

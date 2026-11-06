@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const pl = {
+  sendScope:
+    'Wysłanie prośby udostępnia wybranej AI treść edytowanego dokumentu oraz wybrane zakresy odniesień, załączniki, umiejętności i kontekst projektu.',
+  attachmentLimit: 'Do jednej wiadomości można dołączyć maksymalnie 20 plików.',
+  polishPrompt:
+    'Popraw utrwalone zaznaczenie, a jeśli nie zaznaczono tekstu, cały dokument, aby tekst był jaśniejszy i bardziej płynny.',
   conversation: 'Rozmowa',
   newConversation: 'Nowa rozmowa',
   target: 'Dokument do edycji',

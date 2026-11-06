@@ -14,6 +14,7 @@
  */
 
 import { installDialogTheme } from './dialog-theme.mjs'
+import { createWorkspaceUndoHistory } from './workspace-undo.mjs'
 
 export const AGENT_PLUGIN_ID = 'ieum-agent'
 export const WORKSPACE_CHANGED_EVENT = 'ieum:workspace-changed'
@@ -4074,6 +4075,10 @@ export const agentPlugin = {
     // the panel takes back a run only while this has not moved since the run ended, because
     // the editor's history is one stack and anything on top of the run would be undone first
     let foreign = 0
+    let transactions = 0
+    let rollbackSequence = 0
+    const rollbacks = new Map()
+    const workspaceHistory = createWorkspaceUndoHistory(host)
     let workspaceRevision = 0
     const workspaceInstanceSeed =
       globalThis.crypto?.randomUUID?.() ??
@@ -4086,6 +4091,7 @@ export const agentPlugin = {
       }
       if (workspaceGeneration !== generation) {
         workspaceGeneration = generation
+        rollbacks.clear()
         text = null
         pictures = null
       }
@@ -4944,6 +4950,7 @@ export const agentPlugin = {
             }
             return { result, before, after: paragraphCounts(doc) }
           })
+          transactions += 1
         } catch (thrown) {
           if (thrown && thrown.code === 'MEMO_REMOVAL_REQUIRES_APPROVAL') {
             // the editor rolled the change back; the list is what it was
@@ -5082,6 +5089,7 @@ export const agentPlugin = {
           instance: workspaceInstance(),
           revision: String(workspaceRevision),
           foreignChanges: foreign,
+          readOnly: host.automation.getContext?.()?.isEditable === false,
           masking: 'unsupported',
           selection: api.selection(),
         }
@@ -5089,6 +5097,54 @@ export const agentPlugin = {
 
       /** Current unsaved state, read synchronously inside the editor's own realm. */
       workspaceSnapshot: guarded(() => ({ ...api.workspaceState(), text: api.readText() })),
+
+      /** A bounded editor-local history checkpoint, never document bytes or WASM snapshots. */
+      workspaceCaptureRollback: guarded((expected) => {
+        if (
+          expected?.instance !== workspaceInstance() ||
+          expected.revision !== String(workspaceRevision)
+        )
+          return { ok: false, reason: 'changed' }
+        const history = workspaceHistory.capture()
+        if (!history) return { ok: false, reason: 'unavailable' }
+        const id = `${workspaceInstance()}:rollback:${++rollbackSequence}`
+        rollbacks.set(id, { history, instance: workspaceInstance(), transactions, foreign })
+        while (rollbacks.size > 16) rollbacks.delete(rollbacks.keys().next().value)
+        return { ok: true, id }
+      }),
+
+      workspaceReleaseRollback: guarded((id) => {
+        rollbacks.delete(id)
+      }),
+
+      /** Freshness, complete-history preflight and undo share one synchronous editor task. */
+      workspaceRollback: guarded((expected, id) => {
+        const instance = workspaceInstance()
+        const saved = rollbacks.get(id)
+        if (
+          expected?.instance !== instance ||
+          expected.revision !== String(workspaceRevision) ||
+          !saved ||
+          saved.instance !== instance ||
+          saved.foreign !== foreign
+        )
+          return { ok: false, reason: 'changed' }
+        own = true
+        text = null
+        pictures = null
+        // Consume even on failure: a failed native undo must never be retried as a new run.
+        rollbacks.delete(id)
+        try {
+          if (!workspaceHistory.undo(saved.history, transactions - saved.transactions))
+            return { ok: false, reason: 'unavailable' }
+          api.clearMarks()
+          syncMemos({ notify: false })
+          refreshMemoAnchors()
+          return { ok: true, instance, revision: String(workspaceRevision) }
+        } finally {
+          own = false
+        }
+      }),
 
       /** Check freshness in the same synchronous task as the existing document operation. */
       workspaceInvoke: guarded((expected, method, args) => {

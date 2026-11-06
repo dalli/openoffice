@@ -2,6 +2,20 @@
 
 Chaque éditeur peut appeler le panneau IA: sélectionnez quelque chose, donnez une instruction, regardez le résultat en flux.
 
+## Assistant commun à la fenêtre
+
+Ouvrez le panneau commun avec **Assistant IA** dans la barre d’onglets de la fenêtre principale. Il est fermé au départ. Créez ou choisissez une conversation, puis le document à modifier et les passages de référence parmi les documents HWP/HWPX, DOCX/ODT ou Markdown/texte ouverts dans cette fenêtre. Changer d’onglet ou replier le panneau conserve les brouillons et les tâches en cours. **Arrêter** termine une tâche. Saisir du texte ou changer de conversation n’envoie aucune requête. Les panneaux IA des éditeurs restent disponibles.
+
+Pour un document Word ciblé, Résumer, Améliorer, Mise en forme et Carte mentale remplissent le champ de saisie. Cliquez sur Envoyer pour lancer la demande ; l’amélioration utilise le texte sélectionné initialement, s’il y en a. Les cartes restent dans leur conversation et permettent de replier les branches et de télécharger en PNG/SVG. Un clic sur un sujet prépare une question sur la même cible ; si vous avez changé de cible, sélectionnez d’abord le document d’origine.
+
+Pour un document Word, le texte long apparaît au fil de sa rédaction. Arrêter dans la progression suspend la rédaction et permet de conserver ou supprimer le texte partiel. Arrêter près du champ de saisie termine toute l’exécution et retire le brouillon inachevé. Le choix reste dans la conversation d’origine. Le texte terminé ou conservé peut être annulé avec l’annulation de cette exécution.
+
+Dans la fenêtre principale, les actions IA de Word du ruban, des menus, de F7 et du menu contextuel ouvrent une nouvelle conversation commune avec le document et la sélection concernés. Les confirmations et l’exécution immédiate sont conservées ; ouvrir ou replier l’assistant garde la conversation actuelle. Les fenêtres détachées ou autonomes, un hôte non prêt utilisent le panneau existant, toujours accessible par sa barre repliée.
+
+Dans la fenêtre principale, ajouter une modification de sélection Word ouvre la conversation commune du document. La carte permet de retrouver les passages, modifier les consignes, retirer des éléments ou confirmer la suppression de la file. L’envoi transmet le lot à une nouvelle conversation commune ; une connexion bloquée le conserve comme brouillon. Un transfert échoué garde la file et un document modifié refuse les anciennes positions. Les fenêtres détachées ou autonomes gardent le panneau existant.
+
+Dans la fenêtre principale, une copie de modèle Word issue d’une compétence transmet une seule fois sa demande et ses étiquettes de compétences à une nouvelle conversation partagée. Si la connexion est bloquée, la demande y reste en brouillon. Les copies de projet utilisent le contexte de leur projet d’origine et sont enregistrées dans son dossier sous un nom libre après une exécution réussie. Les aperçus de modèles vierges et les hôtes partagés indisponibles utilisent le panneau habituel de l’éditeur.
+
 ## L’ouvrir et s’en servir
 
 - Le panneau a besoin d’une IA connectée. Si aucune ne l’est, il affiche les cartes de connexion au lieu d’une erreur ; voir [Connexion par abonnement](help://subscription).

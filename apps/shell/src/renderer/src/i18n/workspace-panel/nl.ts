@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const nl = {
+  sendScope:
+    'Bij het verzenden worden de inhoud van het te bewerken document en de gekozen referentiebereiken, bijlagen, vaardigheden en projectcontext gedeeld met de geselecteerde AI.',
+  attachmentLimit: 'Je kunt maximaal 20 bestanden per bericht bijvoegen.',
+  polishPrompt:
+    'Verbeter de vastgezette selectie of, als er geen tekst is geselecteerd, het hele document zodat de tekst duidelijker en vloeiender wordt.',
   conversation: 'Gesprek',
   newConversation: 'Nieuw gesprek',
   target: 'Te bewerken document',

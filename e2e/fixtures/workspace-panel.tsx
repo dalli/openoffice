@@ -39,6 +39,7 @@ const host = new WorkspaceRunHost({
 const captures = new Map<string, WorkspaceCapture>()
 const controller = new WorkspacePanelController({
   host,
+  refresh: async (id) => structuredClone(captures.get(id)!),
   capture: async (tabId) => {
     const id = crypto.randomUUID()
     const value: WorkspaceCapture = {

@@ -34,6 +34,7 @@ export const zhTW = {
   aiChipChartData: '更新圖表資料',
   aiChipChartTitle: '修改圖表標題',
   aiChipTableEdit: '調整列與欄',
+  aiQueueTransferFailed: '無法移交編輯請求。佇列未變更。請檢查文件後重新傳送。',
   aiQueueTitle: '待傳送的修改',
   aiQueueHint: '點擊條目可定位原文;傳送時所有修改合併為一次請求',
   aiQueueSend: '傳送 {count} 條修改',

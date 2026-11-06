@@ -34,6 +34,8 @@ export const vi = {
   aiChipChartData: 'Cập nhật dữ liệu biểu đồ',
   aiChipChartTitle: 'Đổi tiêu đề biểu đồ',
   aiChipTableEdit: 'Điều chỉnh hàng/cột',
+  aiQueueTransferFailed:
+    'Không thể chuyển các yêu cầu chỉnh sửa. Hàng đợi vẫn được giữ nguyên. Hãy kiểm tra tài liệu rồi gửi lại.',
   aiQueueTitle: 'Các chỉnh sửa đang chờ',
   aiQueueHint:
     'Nhấp vào một dòng để định vị đoạn văn; khi gửi sẽ áp dụng tất cả chỉnh sửa trong một yêu cầu',

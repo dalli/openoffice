@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const cs = {
+  sendScope:
+    'Odesláním požadavku sdílíte obsah upravovaného dokumentu a vybrané rozsahy referencí, přílohy, dovednosti a kontext projektu se zvolenou AI.',
+  attachmentLimit: 'K jedné zprávě můžete připojit až 20 souborů.',
+  polishPrompt:
+    'Upravte zachycený výběr, nebo celý dokument, pokud není vybrán žádný text, aby byl text jasnější a plynulejší.',
   conversation: 'Konverzace',
   newConversation: 'Nová konverzace',
   target: 'Dokument k úpravě',

@@ -5,12 +5,17 @@ import type {
   WorkspaceAdapterState,
   WorkspaceReadRequest,
   WorkspaceReadSnapshot,
+  WorkspaceTemplateMode,
+  WorkspaceWriterUpdate,
+  WorkspaceTemplateSnapshot,
 } from '@genoffice/agent-core'
 import type {
   WorkspaceEditorDescription,
   WorkspaceEditorOperation,
   WorkspaceEditorSession,
   WorkspaceEditorValues,
+  WorkspaceEditQueueCommand,
+  WorkspaceEditQueueSnapshot,
 } from '@genoffice/agent-core/workspace-editor-protocol'
 import type { DocumentTabKind } from '../../shared/tabs-api'
 import type {
@@ -37,6 +42,7 @@ export interface WorkspaceEditorClient {
     signal?: AbortSignal,
   ): Promise<WorkspaceEditorValues[O['kind']]>
   onChanged(handler: () => void): () => void
+  onQueueChanged?(handler: () => void): () => void
   onClosed(handler: () => void): () => void
 }
 
@@ -45,6 +51,7 @@ export interface WorkspaceExecutionDeps {
   resolve(tabId: string): { kind: DocumentTabKind; client: WorkspaceEditorClient } | null
   onStopped?(run: WorkspaceAiStoppedRun): void
   onDisposed?(): void
+  onQueueChanged?(tabId: string): void
   now?(): number
   readonly timeoutMs?: number
 }
@@ -115,6 +122,7 @@ interface QueuedRun {
   expected: WorkspaceAdapterState
   session: WorkspaceEditorSession | null
   pending: WorkspaceAiToolTicket | null
+  writerReady?: Promise<void>
   busy: boolean
   timer: ReturnType<typeof setTimeout> | null
 }
@@ -160,6 +168,7 @@ export class WorkspaceExecutionController {
   private disposed = false
   private starting = false
   private rollingBack = false
+  private savingCopy: { handle: WorkspaceRunHandle; abort: AbortController } | null = null
   private active: QueuedRun | null = null
   private draining: Promise<void> = Promise.resolve()
 
@@ -176,17 +185,120 @@ export class WorkspaceExecutionController {
   }
 
   async capture(tabId: string): Promise<WorkspaceCapture> {
+    return this.captureTarget(tabId)
+  }
+
+  /** Queued passages have their own anchors; the last visible selection must not scope the batch. */
+  async captureEditBatch(
+    tabId: string,
+    expected: { documentId: string; revision: string },
+  ): Promise<WorkspaceCapture> {
+    const capture = await this.capture(tabId)
+    const entry = this.captures.get(capture.id) ?? fail('invalid-request')
+    if (
+      entry.resource.kind !== 'docs' ||
+      entry.state.instanceId !== expected.documentId ||
+      entry.state.revision !== expected.revision ||
+      entry.state.readOnly
+    )
+      fail('document-changed')
+    const whole: Captured = {
+      ...entry,
+      state: { ...entry.state, selectionId: null },
+      capture: {
+        id: randomUUID(),
+        binding: { ...capture.binding, selection: null },
+      },
+    }
+    this.captures.delete(capture.id)
+    this.captures.set(whole.capture.id, whole)
+    return structuredClone(whole.capture)
+  }
+
+  /** An explicit card action reads the original target's current edited copy, never the focused tab or disk. */
+  async template(
+    document: WorkspaceDocumentIdentity,
+    mode: WorkspaceTemplateMode,
+  ): Promise<WorkspaceTemplateSnapshot | null> {
+    if (document.windowId !== this.owner.windowId) fail('wrong-owner')
+    if (this.active) fail('call-in-flight')
+    const capture = await this.capture(document.tabId)
+    if (!sameWorkspaceDocument(capture.binding.document, document)) fail('editor-replaced')
+    const entry = this.captures.get(capture.id) ?? fail('invalid-request')
+    const serial = entry.resource.serial
+    const snapshot = await this.request(
+      entry.resource,
+      { kind: 'template', state: entry.state, mode },
+      this.lifetime.signal,
+    )
+    this.live()
+    if (this.active || entry.resource.serial !== serial) fail('document-changed')
+    const state = await this.request(entry.resource, { kind: 'capture' }, this.lifetime.signal)
+    if (entry.resource.serial !== serial || !sameVersion(state, entry.state))
+      fail('document-changed')
+    return snapshot
+  }
+
+  /** UI-only queue access stays bound to the selected document's live view. */
+  async editQueue(
+    document: WorkspaceDocumentIdentity,
+    command: WorkspaceEditQueueCommand,
+  ): Promise<WorkspaceEditQueueSnapshot | null> {
+    this.live()
+    if (document.windowId !== this.owner.windowId) fail('wrong-owner')
+    if (document.kind !== 'docs') fail('invalid-request')
+    if (this.active || this.starting || this.rollingBack || this.savingCopy) fail('call-in-flight')
+    const resource = this.resource(document.tabId)
+    if (!resource.identity || !sameWorkspaceDocument(resource.identity, document))
+      fail('editor-replaced')
+    const state = await this.request(resource, { kind: 'capture' }, this.lifetime.signal)
+    this.live()
+    if (state.instanceId !== document.documentId || this.resource(document.tabId) !== resource)
+      fail('editor-replaced')
+    if (this.active || this.starting || this.rollingBack || this.savingCopy) fail('call-in-flight')
+    // Reading a card must not allocate captures and evict another conversation's target.
+    return this.request(resource, { kind: 'edit-queue', state, command }, this.lifetime.signal)
+  }
+
+  /** Renew only this document and its retained range. References and queued bindings stay fixed. */
+  async refresh(captureId: string): Promise<WorkspaceCapture> {
+    this.live()
+    const previous = this.captures.get(captureId) ?? fail('invalid-request')
+    if (
+      this.resource(previous.resource.tabId) !== previous.resource ||
+      !previous.resource.identity ||
+      !sameWorkspaceDocument(previous.capture.binding.document, previous.resource.identity)
+    )
+      fail('editor-replaced')
+    return this.captureTarget(previous.resource.tabId, previous)
+  }
+
+  private async captureTarget(tabId: string, previous?: Captured): Promise<WorkspaceCapture> {
     this.live()
     const resource = this.resource(tabId)
     if (this.active?.pending?.access === 'write' && this.active.target.resource === resource)
       fail('call-in-flight')
     const serial = resource.serial
-    const description = await this.request(resource, { kind: 'describe' }, this.lifetime.signal)
+    let description = await this.request(resource, { kind: 'describe' }, this.lifetime.signal)
+    if (previous) {
+      if (description.state.instanceId !== previous.state.instanceId) fail('editor-replaced')
+      const state = await this.request(
+        resource,
+        { kind: 'refresh', state: previous.state },
+        this.lifetime.signal,
+      )
+      if (
+        !sameVersion(description.state, state) ||
+        state.selectionId !== previous.state.selectionId
+      )
+        fail('document-changed')
+      description = { ...description, state }
+    }
     this.live()
     if (serial !== resource.serial) fail('document-changed')
     if (!description.observesChanges) fail('unsupported-read')
-    const previous = resource.identity
-    if (!previous || previous.documentId !== description.state.instanceId) {
+    const identity = resource.identity
+    if (!identity || identity.documentId !== description.state.instanceId) {
       resource.identity = {
         windowId: this.owner.windowId,
         tabId,
@@ -284,7 +396,7 @@ export class WorkspaceExecutionController {
   /** FIFO preparation only. The caller must apply the existing send gate before any model call. */
   async startNext(): Promise<WorkspaceStartedRun | null> {
     this.live()
-    if (this.starting || this.rollingBack) return null
+    if (this.starting || this.rollingBack || this.savingCopy) return null
     this.starting = true
     try {
       await this.draining
@@ -352,17 +464,23 @@ export class WorkspaceExecutionController {
       fail('unknown-tool')
     }
     run.busy = true
+    let ready!: () => void
+    run.writerReady = new Promise<void>((resolve) => {
+      ready = resolve
+    })
     run.pending = ticket
     try {
       const session = run.session ?? fail('run-not-active')
       if (!session.tools.some((tool) => tool.name === call.name)) fail('unknown-tool')
       await this.checkDocuments(run)
       this.running(handle)
-      const answer = await this.request(
+      const executing = this.request(
         run.target.resource,
         { kind: 'execute', sessionId: session.id, runId: session.runId, call },
         run.abort.signal,
       )
+      ready()
+      const answer = await executing
       this.running(handle)
       // Native editor guards protect the actual mutation; references are checked again before acceptance.
       await this.checkReferences(run)
@@ -397,9 +515,37 @@ export class WorkspaceExecutionController {
       this.stopForError(run, error)
       throw error
     } finally {
+      ready()
+      run.writerReady = undefined
       run.pending = null
       run.busy = false
     }
+  }
+
+  async updateWriter(
+    handle: WorkspaceRunHandle,
+    callId: string,
+    update: WorkspaceWriterUpdate,
+  ): Promise<void> {
+    const run = this.running(handle)
+    if (!run.pending || run.pending.callId !== callId || run.pending.tool !== 'write_document')
+      fail('invalid-request')
+    await run.writerReady
+    this.running(handle)
+    if (!run.pending || run.pending.callId !== callId) fail('invalid-request')
+    await this.checkReferences(run)
+    const session = run.session ?? fail('run-not-active')
+    await this.request(
+      run.target.resource,
+      {
+        kind: 'writer-update',
+        sessionId: session.id,
+        runId: session.runId,
+        callId,
+        update,
+      },
+      run.abort.signal,
+    )
   }
 
   async verifyResponse(
@@ -454,8 +600,58 @@ export class WorkspaceExecutionController {
     }
   }
 
+  /** Only main's acknowledged template capability may request this first project save. */
+  async completeProjectCopy(handle: WorkspaceRunHandle, projectId: string): Promise<void> {
+    const run = this.running(handle)
+    if (
+      this.savingCopy ||
+      run.binding.project?.id !== projectId ||
+      run.target.resource.kind !== 'docs'
+    )
+      fail('invalid-request')
+    const saving = { handle: structuredClone(handle), abort: new AbortController() }
+    this.savingCopy = saving
+    try {
+      await this.complete(handle)
+      this.live()
+      const saved = await this.request(
+        run.target.resource,
+        {
+          kind: 'save-project-copy',
+          runId: run.editorRunId,
+          state: run.expected,
+          projectId,
+        },
+        AbortSignal.any([this.lifetime.signal, saving.abort.signal]),
+      )
+      if (!saved) fail('editor-error')
+    } finally {
+      if (run.target.resource.client.available) {
+        const settling = run.target.resource.client
+          .request({ kind: 'settle', runId: run.editorRunId })
+          .then(
+            () => {},
+            () => {},
+          )
+        this.draining = Promise.all([this.draining, settling]).then(() => {})
+        await this.draining
+      }
+      this.savingCopy = null
+    }
+  }
+
   cancel(handle: WorkspaceRunHandle): void {
     this.owned(handle)
+    const saving = this.savingCopy
+    if (
+      saving &&
+      saving.handle.bindingId === handle.bindingId &&
+      saving.handle.runId === handle.runId &&
+      saving.handle.conversationId === handle.conversationId
+    ) {
+      saving.abort.abort()
+      return
+    }
     unwrap(this.registry.cancel(this.owner, handle.conversationId, handle.runId, handle.bindingId))
   }
 
@@ -474,7 +670,7 @@ export class WorkspaceExecutionController {
   async rollback(handle: WorkspaceRollbackHandle): Promise<void> {
     this.live()
     this.owned(handle)
-    if (this.rollingBack || this.starting || this.active) fail('call-in-flight')
+    if (this.rollingBack || this.starting || this.active || this.savingCopy) fail('call-in-flight')
     const saved = this.rollbacks.get(handle.bindingId)
     if (
       !saved ||
@@ -584,9 +780,11 @@ export class WorkspaceExecutionController {
       resource.serial++
       if (resource.identity) this.registry.closeDocument(resource.identity)
     })
+    const offQueue = resolved.client.onQueueChanged?.(() => this.deps.onQueueChanged?.(tabId))
     resource.off = () => {
       offChanges()
       offClosed()
+      offQueue?.()
     }
     this.resources.set(tabId, resource)
     return resource

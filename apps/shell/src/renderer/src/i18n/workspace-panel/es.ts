@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const es = {
+  sendScope:
+    'Al enviar una solicitud, se comparten el contenido del documento que se editará y los ámbitos de referencia, adjuntos, habilidades y contexto del proyecto elegidos con la IA seleccionada.',
+  attachmentLimit: 'Puedes adjuntar hasta 20 archivos por mensaje.',
+  polishPrompt:
+    'Mejora la selección fijada o, si no hay texto seleccionado, todo el documento para que la redacción sea más clara y fluida.',
   conversation: 'Conversación',
   newConversation: 'Nueva conversación',
   target: 'Documento a editar',

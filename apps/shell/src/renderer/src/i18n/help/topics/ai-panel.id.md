@@ -2,6 +2,20 @@
 
 Setiap editor bisa memunculkan panel AI: pilih sesuatu, beri instruksi, dan lihat hasilnya mengalir.
 
+## Asisten bersama untuk jendela
+
+Buka panel bersama melalui **Asisten AI** di bilah tab jendela utama. Panel awalnya tertutup. Buat atau pilih percakapan, lalu pilih dokumen yang akan diedit dan cakupan referensi dari dokumen HWP/HWPX, DOCX/ODT, atau Markdown/teks yang terbuka di jendela yang sama. Berpindah tab atau menciutkan panel tetap mempertahankan draf dan pekerjaan yang berjalan. **Hentikan** mengakhiri pekerjaan. Mengetik atau mengganti percakapan tidak mengirim permintaan. Panel AI editor yang lama tetap tersedia.
+
+Jika targetnya dokumen Word, tombol Ringkas, Perbaiki, Format dan Peta pikiran mengisi kolom permintaan. Tekan Kirim untuk menjalankannya; Perbaiki memakai teks yang dipilih semula jika ada pilihan. Peta tetap berada dalam percakapannya dan mendukung pelipatan cabang serta unduhan PNG/SVG. Mengeklik topik menyiapkan pertanyaan tentang target yang sama; jika target diubah, pilih kembali dokumen asal terlebih dahulu.
+
+Untuk dokumen Word, tulisan panjang muncul saat dibuat. Hentikan pada kemajuan penulisan memungkinkan Anda menyimpan atau membuang teks yang belum selesai. Hentikan di samping kolom masukan mengakhiri seluruh proses dan menghapus draf yang belum selesai. Pilihan tetap berada dalam percakapan asal. Tulisan yang selesai atau disimpan dapat dibatalkan melalui pembatalan proses ini.
+
+Di jendela utama, tindakan AI Word dari pita, menu, F7, dan menu klik kanan membuka percakapan bersama baru dengan dokumen dan pilihan yang diklik. Konfirmasi dan eksekusi langsung tetap berlaku; membuka atau menciutkan asisten mempertahankan percakapan saat ini. Jendela terpisah atau mandiri, host yang belum siap memakai panel lama. Panel tersebut tetap dapat dibuka dari bilah yang diciutkan.
+
+Di jendela utama, menambahkan edit pilihan Word ke antrean membuka percakapan bersama dokumen tersebut. Kartu memungkinkan Anda menemukan bagian teks, mengedit instruksi, menghapus item, atau mengonfirmasi pengosongan antrean. Mengirim memindahkan kumpulan ke percakapan bersama baru; koneksi yang diblokir menyimpan permintaan sebagai draf. Kegagalan transfer mempertahankan antrean, dan dokumen yang berubah tidak memakai posisi lama. Jendela terpisah dan mandiri tetap memakai panel lama.
+
+Di jendela utama, salinan templat keterampilan Word meneruskan permintaan dan chip keterampilannya satu kali ke percakapan bersama yang baru. Jika koneksi diblokir, permintaan tetap menjadi draf di sana. Salinan proyek memakai konteks proyek asalnya dan disimpan ke folder tersebut dengan nama yang belum dipakai setelah proses berhasil. Pratinjau templat kosong dan host bersama yang tidak tersedia menggunakan panel editor yang sudah ada.
+
 ## Membuka dan menggunakannya
 
 - Panel ini memerlukan AI yang terhubung. Jika belum ada, panel menampilkan kartu koneksi, bukan pesan galat; lihat [Koneksi langganan](help://subscription).

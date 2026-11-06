@@ -83,6 +83,38 @@ document content of any other editor. The diagram is not sent as a picture.
 The same text table is what other editors' AI panels receive when you attach
 a diagram or pick it with `@`.
 
+The shared workspace AI panel is available from the main window's tab bar.
+It starts closed unless you previously left it open and enabled remembering
+the panel state. When you send a request, the selected AI receives
+the edit target's current content, the reference scopes you explicitly chose,
+and the attachments, skills and project context included in that request.
+Simply opening or selecting documents or conversations sends no model request.
+Word’s queued-edit card reads only current hidden-part-filtered excerpts from
+the selected edit target. Deleted anchors do not reveal their saved excerpts.
+Viewing, editing or removing queue items makes no model request and stores no
+extra conversation record; sending uses the existing batch request flow.
+A skill proposal made for a DOCX/ODT target can use an edited copy of that
+document as a template. Only its explicit template buttons read the bytes;
+the copy goes to the existing local template save or preview service, not to
+model history or conversation files. Known hidden parts block saving the
+original as it is. Making a blank template opens a copy and uses its editor's
+existing AI request to clear the filled-in values.
+The same hiding, provider selection and Drive restrictions apply. Its notice
+states this scope before you send; it uses the existing first-connection notice.
+The shared panel currently supports open HWP/HWPX, DOCX/ODT and Markdown/text
+documents. For a DOCX/ODT edit target it also uses the existing comment and
+footnote/endnote readers and editing tools, subject to that format’s limits.
+Comment context includes unresolved threads and projected anchor excerpts;
+note text is read when the model calls the note reader. Explicit reference
+reads remain limited to the body or selection you chose. Undo snapshots of
+review lists stay in the editor’s memory. For these edit targets, the existing
+header/footer and section readers also supply header/footer text and page
+settings in context. Style names are read through the style tool. Layout,
+style and watermark tools edit the same pending stores as the document UI;
+these edits do not save the original file automatically. Their undo snapshots
+stay in the editor’s memory. Reference reads still include only the chosen
+body or selection. Existing editor AI panels remain available during migration.
+
 When a local AI server's address is not this PC or a private-network IP
 address, the Local AI card says where documents go: over `http://` it warns
 that they are sent without encryption, and for a public IP address over
@@ -560,3 +592,7 @@ is responsible for saying so.
 Open an issue at
 [github.com/pblsketch/openoffice/issues](https://github.com/pblsketch/openoffice/issues).
 For a suspected security problem, follow [SECURITY.md](SECURITY.md) instead.
+
+## Long writing in the shared panel
+
+In the shared panel, long writing for a Word document uses the same tool-less writing request as the editor panel: the plan (up to 6,000 characters), reference material (up to 8,000), title, and original user request (up to 2,000) go to the AI provider in use. The streamed draft and keep/discard choice stay with the original conversation in window memory. A separate native session keeps this writing response apart from the conversation; provider selection and billing rules stay the same. Completed or adopted text follows the existing document save and recovery rules.

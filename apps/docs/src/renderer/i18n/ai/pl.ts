@@ -35,6 +35,8 @@ export const pl = {
   aiChipChartData: 'Zaktualizuj dane wykresu',
   aiChipChartTitle: 'Zmień tytuł wykresu',
   aiChipTableEdit: 'Dostosuj wiersze/kolumny',
+  aiQueueTransferFailed:
+    'Nie udało się przekazać zmian. Kolejka pozostała bez zmian. Sprawdź dokument i wyślij ponownie.',
   aiQueueTitle: 'Zmiany w kolejce',
   aiQueueHint:
     'Kliknij wiersz, aby zlokalizować fragment; wysłanie zastosuje wszystkie zmiany w jednym żądaniu',

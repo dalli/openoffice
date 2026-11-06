@@ -1098,13 +1098,23 @@ export function save(
  * stays untitled, as before. A refused write keeps it untitled and says why.
  * Resolves true when the document now has its file in the project.
  */
-export function saveIntoProject(ctx: FileActionContext, newDocName: string): Promise<boolean> {
+export interface ProjectCopySaveGuard {
+  expectedProjectId: string
+  validate(): Promise<void>
+}
+
+export function saveIntoProject(
+  ctx: FileActionContext,
+  newDocName: string,
+  guard?: ProjectCopySaveGuard,
+): Promise<boolean> {
   const generation = docGeneration
   return runSerializedSave(
     async () => {
       const settled = ctx.settleFontSettings ? await ctx.settleFontSettings() : ctx
       if (docGeneration !== generation) return false
-      return saveOnce(settled, false, true, newDocName, undefined, true)
+      await guard?.validate()
+      return saveOnce(settled, false, true, newDocName, undefined, true, guard)
     },
     () => false,
   )
@@ -1260,6 +1270,7 @@ async function saveOnce(
   explicitTarget?: ExplicitSaveTarget,
   /** a never-saved document into its panel's project (spec 6), no dialog */
   intoProject = false,
+  projectGuard?: ProjectCopySaveGuard,
 ): Promise<boolean> {
   const { doc, editor } = ctx
   if (!doc || !editor) return false
@@ -1330,11 +1341,14 @@ async function saveOnce(
       if (result.dataUrl) fullBytes = await fetchDocBytes(result.dataUrl)
       if (!doc.filePath) pathlessDocSavedPath = savedPath
     } else if (intoProject) {
+      const data = await fileBytes()
+      await projectGuard?.validate()
       const result = window.desktop.saveDocxIntoProject
         ? await window.desktop.saveDocxIntoProject(
             newDocName ?? doc.fileName,
             format,
-            await fileBytes(),
+            data,
+            ...(projectGuard ? [projectGuard.expectedProjectId] : []),
           )
         : { ok: false, skipped: true }
       if (!result.ok) {

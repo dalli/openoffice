@@ -28,6 +28,21 @@ export interface WorkspaceReadSnapshot extends WorkspaceReadContent {
   readonly masking: 'applied' | 'unsupported'
 }
 
+/** Explicit local template actions; these bytes are never model context. */
+export type WorkspaceTemplateMode = 'info' | 'preview' | 'as-is'
+export interface WorkspaceTemplateSnapshot {
+  readonly fileName: string
+  readonly title: string
+  readonly redacted: boolean
+  readonly bytes: Uint8Array | null
+}
+
+/** Private cumulative output for a live editor tool; never a model-call capability. */
+export type WorkspaceWriterUpdate =
+  | { kind: 'ready' }
+  | { kind: 'progress'; text: string }
+  | { kind: 'result'; ok: boolean; text?: string; truncated?: boolean; error?: string }
+
 export type WorkspaceAdapterErrorKind =
   | 'not-ready'
   | 'disposed'
@@ -73,11 +88,14 @@ export interface WorkspacePreparedDocument {
 }
 
 export interface WorkspaceDocumentAdapter {
+  updateWriter?(callId: string, update: WorkspaceWriterUpdate, signal?: AbortSignal): Promise<void>
   readonly toolAccess: Readonly<Record<string, 'read' | 'write'>>
   readonly masking: 'applied' | 'unsupported'
   readonly observesChanges: boolean
   subscribeChanges(handler: () => void): () => void
   capture(signal?: AbortSignal): Promise<WorkspaceAdapterState>
+  /** Refresh metadata for the same pinned selection; never adopts the visible caret. */
+  refresh(state: WorkspaceAdapterState, signal?: AbortSignal): Promise<WorkspaceAdapterState>
   read(
     state: WorkspaceAdapterState,
     request: WorkspaceReadRequest,
@@ -87,6 +105,11 @@ export interface WorkspaceDocumentAdapter {
     request: WorkspacePrepareRequest,
     signal?: AbortSignal,
   ): Promise<WorkspacePreparedDocument>
+  template?(
+    state: WorkspaceAdapterState,
+    mode: WorkspaceTemplateMode,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceTemplateSnapshot | null>
   rollback?(
     id: string,
     state: WorkspaceAdapterState,
@@ -99,6 +122,12 @@ export interface WorkspaceDocumentAdapterDeps {
   /** Unsupported formats cannot claim that their snapshots apply masking. */
   readonly masking?: 'applied' | 'unsupported'
   getState(): WorkspaceAdapterState | Promise<WorkspaceAdapterState>
+  /** Return the retained selection handle only when its range is valid at the current revision. */
+  refreshSelection?(
+    state: WorkspaceAdapterState,
+    current: WorkspaceAdapterState,
+    signal?: AbortSignal,
+  ): string | Promise<string>
   read(
     state: WorkspaceAdapterState,
     request: WorkspaceReadRequest,
@@ -108,12 +137,24 @@ export interface WorkspaceDocumentAdapterDeps {
   createSkill(state: WorkspaceAdapterState, signal?: AbortSignal): AgentSkill | Promise<AgentSkill>
   /** Explicit local document capabilities; unlisted tools never cross this boundary. */
   readonly toolAccess: Readonly<Record<string, 'read' | 'write'>>
+  template?(
+    state: WorkspaceAdapterState,
+    mode: WorkspaceTemplateMode,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceTemplateSnapshot | null>
   /** Metadata-only invalidation, including edits outside the document body. */
   subscribeChanges?(handler: () => void): () => void
   /** Original editor undo/change-tracking hook, once before the first write. */
   beforeFirstWrite?(signal?: AbortSignal): void | Promise<void>
-  /** Editor-local immutable snapshot. Restore must synchronously validate/apply, with no async gap. */
-  rollback?: { capture(): unknown; restore(snapshot: unknown): void }
+  /** Editor-local snapshot or checkpoint. Async bridges must validate/apply atomically at the editor. */
+  rollback?: {
+    capture(state: WorkspaceAdapterState, signal?: AbortSignal): unknown | Promise<unknown>
+    restore(
+      snapshot: unknown,
+      state: WorkspaceAdapterState,
+      signal?: AbortSignal,
+    ): void | Promise<void>
+  }
   dispose?(): void
 }
 
@@ -185,6 +226,22 @@ export function createWorkspaceDocumentAdapter(
       return unsubscribe
     },
     capture,
+    async refresh(state, signal) {
+      live()
+      state = Object.freeze({ ...state })
+      const current = await capture(signal)
+      if (state.instanceId !== current.instanceId) fail('stale-document')
+      const selectionId = state.selectionId
+        ? deps.refreshSelection
+          ? await deps.refreshSelection(state, current, signal)
+          : sameDocument(state, current)
+            ? state.selectionId
+            : fail('stale-selection')
+        : null
+      if (selectionId !== state.selectionId) fail('stale-selection')
+      await assertCurrent(current, signal)
+      return Object.freeze({ ...current, selectionId })
+    },
     async rollback(id, state, signal) {
       live()
       if (active) fail('busy')
@@ -196,7 +253,7 @@ export function createWorkspaceDocumentAdapter(
         if (current.readOnly) fail('read-only')
         live()
         checkAbort(signal)
-        deps.rollback!.restore(saved!.snapshot)
+        await deps.rollback!.restore(saved!.snapshot, current, signal)
         rollbacks.delete(id)
         return await capture(signal)
       } finally {
@@ -220,6 +277,23 @@ export function createWorkspaceDocumentAdapter(
         state: Object.freeze({ ...state }),
         scope: request.scope,
         masking,
+      }
+    },
+    async template(state, mode, signal) {
+      live()
+      if (active) fail('busy')
+      if (!['info', 'preview', 'as-is'].includes(mode)) fail('invalid-call')
+      await assertCurrent(state, signal)
+      if (!deps.template) return null
+      if (active) fail('busy')
+      active = true
+      try {
+        const snapshot = await deps.template(state, mode, signal)
+        await assertCurrent(state, signal)
+        if (snapshot && mode === 'as-is' && snapshot.redacted) fail('unsafe-content')
+        return snapshot
+      } finally {
+        active = false
       }
     },
     async prepare(request, signal) {
@@ -314,9 +388,11 @@ export function createWorkspaceDocumentAdapter(
                 if (before.readOnly || mode === 'reference') fail('read-only')
                 if (!undoCaptured) {
                   await deps.beforeFirstWrite?.(operationSignal)
-                  undoCaptured = true
                   if ((await assertCurrent(state, operationSignal)).readOnly) fail('read-only')
-                  rollbackSnapshot = deps.rollback?.capture()
+                  rollbackSnapshot = await deps.rollback?.capture(state, operationSignal)
+                  ready()
+                  if ((await assertCurrent(state, operationSignal)).readOnly) fail('read-only')
+                  undoCaptured = true
                 }
               }
               ready()

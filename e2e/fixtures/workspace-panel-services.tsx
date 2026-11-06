@@ -46,6 +46,14 @@ export async function installWorkspacePanelServices() {
             controller: connected.controller,
             layout,
             uiScale: 1,
+            attachmentBridge: connected.client,
+            userSkills: connected.userSkills,
+            userMcp: connected.userMcp,
+            projectBridge: (
+              window as unknown as {
+                projectFolderApi: import('@genoffice/project-store').ProjectFolderApi
+              }
+            ).projectFolderApi,
             setOpen(open) {
               void connected.client.layout({ side: 'right', width: 400, open }).then(render)
             },

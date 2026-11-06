@@ -34,6 +34,8 @@ export const ja = {
   aiChipChartData: 'グラフのデータを更新',
   aiChipChartTitle: 'グラフのタイトルを変更',
   aiChipTableEdit: '行と列を調整',
+  aiQueueTransferFailed:
+    '編集リクエストを引き継げませんでした。キューはそのままです。文書を確認して再送してください。',
   aiQueueTitle: '送信待ちの修正',
   aiQueueHint:
     '行をクリックすると本文の該当箇所へ移動します。送信時にすべての修正を 1 回のリクエストにまとめます',

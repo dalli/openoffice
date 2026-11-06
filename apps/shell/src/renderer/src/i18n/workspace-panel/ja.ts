@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const ja = {
+  sendScope:
+    '送信すると、編集対象の内容と、選択した参照範囲・添付・スキル・プロジェクトの文脈が選択したAIに送られます。',
+  attachmentLimit: '1回のメッセージに添付できるファイルは20個までです。',
+  polishPrompt:
+    '固定した選択範囲があればその部分を、選択したテキストがなければ文書全体を、より明確で自然な文章に整えてください。',
   conversation: '会話',
   newConversation: '新しい会話',
   target: '編集対象',

@@ -25,6 +25,8 @@ export {
   composeWithDrive,
   createBridgedDriveSkill,
   createDriveSkill,
+  readAnswerOf,
+  searchAnswerOf,
   guardDriveContent,
   hasDriveBridge,
   holdsDriveContent,

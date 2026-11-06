@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
-import type { Selection, Transaction } from '@tiptap/pm/state'
+import { Selection, type Transaction } from '@tiptap/pm/state'
 import {
   createWorkspaceDocumentAdapter,
   WorkspaceAdapterError,
@@ -15,12 +15,22 @@ import { isTrackedDeleted, liveText } from './doc-utils'
 import { redactTextBetween } from './redact-view'
 import { REDACT_MARK, sanitizeLabel } from './redact'
 import { captureRollbackSnapshot, restoreRollbackSnapshot } from './rollback-snapshot'
+import type { DocsReviewState, DocsReviewStore } from '../review-store'
+import type { AiCommentsAccess, AiHeaderFooterAccess, AiDocExtras } from './tools'
+import type { AiPageSetupAccess } from './page-setup'
+import type { DocsLayoutState, DocsLayoutStore } from '../layout-store'
+import type { AiNotesAccess } from './note-ops'
+import { DRAFT_META } from './doc-writer'
+import { WorkspaceDocWriter } from './workspace-writer'
+import type { TemplateDocument } from '@genoffice/ui'
 
-/** Body-only capabilities; media, network, files and app-owned side stores stay outside this adapter. */
+/** Body capabilities; additional tools require the corresponding observed App stores. */
 export const DOCS_WORKSPACE_TOOL_ACCESS = {
   get_document_context: 'read',
   read_blocks: 'read',
   read_revisions: 'read',
+  generate_mindmap: 'read',
+  write_document: 'write',
   insert_content: 'write',
   replace_blocks: 'write',
   replace_selection: 'write',
@@ -31,23 +41,49 @@ export const DOCS_WORKSPACE_TOOL_ACCESS = {
   edit_chart: 'write',
 } as const
 
+const COMMENT_TOOL_ACCESS = {
+  read_comments: 'read',
+  add_comment: 'write',
+  reply_comment: 'write',
+  resolve_comment: 'write',
+  delete_comment: 'write',
+} as const
+
+const NOTE_TOOL_ACCESS = {
+  read_notes: 'read',
+  insert_footnote: 'write',
+  insert_endnote: 'write',
+  edit_note: 'write',
+  delete_note: 'write',
+} as const
+
 export interface DocsWorkspaceAdapterDeps {
   getEditor(): Editor | null
   /** Opaque document-load token; changes on reload/new file, even when the same Editor is reused. */
   getDocumentId(): string
   getNumIds(): NumIds
   getTrack?(): AiTrack | undefined
+  layoutStore?: DocsLayoutStore
+  getLayoutBaseline?(): unknown
+  getHf?(): AiHeaderFooterAccess | undefined
+  getPageSetup?(): AiPageSetupAccess | undefined
+  getExtras?(): AiDocExtras | undefined
+  reviewStore?: DocsReviewStore
+  getComments?(): AiCommentsAccess | undefined
+  getNotes?(): AiNotesAccess | undefined
+  getTemplateDocument?(): TemplateDocument | null
   beforeFirstWrite?(editor: Editor, signal?: AbortSignal): void | Promise<void>
 }
 
 interface SelectionSnapshot {
   readonly id: string
   readonly instanceId: string
-  readonly revision: string
+  revision: string
   readonly editor: Editor
-  readonly doc: ProseMirrorNode
-  readonly scope: SelectionScope
-  readonly selection: Selection
+  doc: ProseMirrorNode
+  scope: SelectionScope
+  selection: Selection
+  valid: boolean
 }
 
 /** Bounded, in-memory selection handles. Eviction rejects an old request; it never substitutes a live range. */
@@ -90,6 +126,7 @@ function safeRedactions(doc: ProseMirrorNode): void {
 export function createDocsWorkspaceAdapter(
   deps: DocsWorkspaceAdapterDeps,
 ): WorkspaceDocumentAdapter {
+  const writer = new WorkspaceDocWriter()
   let attached: Editor | null = null
   let lastDoc: ProseMirrorNode | null = null
   let documentId: string | null = null
@@ -99,12 +136,45 @@ export function createDocsWorkspaceAdapter(
   let prepareFirstWrite: ((signal?: AbortSignal) => void | Promise<void>) | null = null
   const selections = new Map<string, SelectionSnapshot>()
   const changes = new Set<() => void>()
+  let layoutBaseline = deps.getLayoutBaseline?.()
+  let layoutRevision = deps.layoutStore?.revision ?? 0
+  const offLayout = deps.layoutStore?.subscribe(() => {
+    const next = deps.layoutStore!.revision
+    if (next === layoutRevision) return
+    layoutRevision = next
+    revision++
+    for (const notify of changes) notify()
+  })
+  let reviewRevision = deps.reviewStore?.revision ?? 0
+  const offReview = deps.reviewStore?.subscribe(() => {
+    const next = deps.reviewStore!.revision
+    if (next === reviewRevision) return
+    reviewRevision = next
+    revision++
+    for (const notify of changes) notify()
+  })
+  const toolAccess: Readonly<Record<string, 'read' | 'write'>> = {
+    ...DOCS_WORKSPACE_TOOL_ACCESS,
+    ...(deps.layoutStore && deps.getHf ? { set_header_footer: 'write' as const } : {}),
+    ...(deps.layoutStore && deps.getPageSetup
+      ? { set_page_setup: 'write' as const, insert_section_break: 'write' as const }
+      : {}),
+    ...(deps.layoutStore && deps.getExtras
+      ? {
+          list_styles: 'read' as const,
+          define_style: 'write' as const,
+          set_watermark: 'write' as const,
+        }
+      : {}),
+    ...(deps.reviewStore && deps.getComments ? COMMENT_TOOL_ACCESS : {}),
+    ...(deps.reviewStore && deps.getNotes ? NOTE_TOOL_ACCESS : {}),
+  }
 
   const onTransaction = ({ transaction }: { transaction: Transaction }): void => {
     if (!transaction.docChanged) return
-    revision++
     lastDoc = attached?.state.doc ?? null
-    selections.clear()
+    if (transaction.getMeta(DRAFT_META)) return
+    revision++
     for (const notify of changes) notify()
   }
   const current = (): { editor: Editor; instanceId: string; revision: string } => {
@@ -126,6 +196,13 @@ export function createDocsWorkspaceAdapter(
       lastDoc = editor.state.doc
       selections.clear()
     }
+    const nextBaseline = deps.getLayoutBaseline?.()
+    if (deps.layoutStore && nextBaseline == null) throw new WorkspaceAdapterError('not-ready')
+    if (layoutBaseline !== nextBaseline) {
+      layoutBaseline = nextBaseline
+      revision++
+      selections.clear()
+    }
     safeRedactions(editor.state.doc)
     return {
       editor,
@@ -138,9 +215,24 @@ export function createDocsWorkspaceAdapter(
     if (live.instanceId !== state.instanceId || live.revision !== state.revision) {
       throw new WorkspaceAdapterError('stale-document')
     }
+    if (state.selectionId === null) {
+      // A document-scoped request never borrows the user's current selection.
+      const selection = Selection.atEnd(live.editor.state.doc)
+      return {
+        id: '',
+        instanceId: live.instanceId,
+        revision: live.revision,
+        editor: live.editor,
+        doc: live.editor.state.doc,
+        scope: getSelectionScope(live.editor, selection),
+        selection,
+        valid: true,
+      }
+    }
     const selection = state.selectionId ? selections.get(state.selectionId) : undefined
     if (
       !selection ||
+      !selection.valid ||
       selection.editor !== live.editor ||
       selection.doc !== live.editor.state.doc ||
       selection.instanceId !== state.instanceId ||
@@ -151,7 +243,7 @@ export function createDocsWorkspaceAdapter(
     return selection
   }
 
-  return createWorkspaceDocumentAdapter({
+  const adapter = createWorkspaceDocumentAdapter({
     masking: 'applied',
     subscribeChanges(handler) {
       changes.add(handler)
@@ -165,6 +257,7 @@ export function createDocsWorkspaceAdapter(
       let selection = [...selections.values()].find(
         (snapshot) =>
           snapshot.editor === live.editor &&
+          snapshot.valid &&
           snapshot.doc === live.editor.state.doc &&
           snapshot.selection.eq(live.editor.state.selection),
       )
@@ -177,6 +270,7 @@ export function createDocsWorkspaceAdapter(
           doc: live.editor.state.doc,
           scope: { ...scope },
           selection: live.editor.state.selection,
+          valid: true,
         }
         selections.set(selection.id, selection)
         if (selections.size > MAX_SELECTION_SNAPSHOTS)
@@ -188,6 +282,18 @@ export function createDocsWorkspaceAdapter(
         selectionId: selection.id,
         readOnly: !live.editor.isEditable,
       }
+    },
+    refreshSelection(state, now) {
+      const selection = state.selectionId ? selections.get(state.selectionId) : undefined
+      if (
+        !selection ||
+        !selection.valid ||
+        selection.instanceId !== now.instanceId ||
+        selection.revision !== now.revision ||
+        selection.doc !== current().editor.state.doc
+      )
+        throw new WorkspaceAdapterError('stale-selection')
+      return selection.id
     },
     read(state, request) {
       const selection = selectionFor(state)
@@ -205,11 +311,40 @@ export function createDocsWorkspaceAdapter(
           : liveText(selection.editor.state.doc, false, { blockSeparator: '\n' })
       return { text, truncated: false }
     },
+    async template(_state, mode, signal) {
+      const source = deps.getTemplateDocument?.()
+      if (!source) return null
+      const hidden = () => {
+        let redacted = false
+        current().editor.state.doc.descendants((node) => {
+          if (node.marks.some((mark) => mark.type.name === REDACT_MARK)) redacted = true
+        })
+        return redacted
+      }
+      const redacted = hidden() || (await source.redacted()) !== false
+      if (mode === 'as-is' && redacted) throw new WorkspaceAdapterError('unsafe-content')
+      const bytes = mode === 'info' ? null : await source.bytes()
+      if (signal?.aborted) throw new WorkspaceAdapterError('cancelled')
+      return {
+        fileName: source.fileName,
+        title: source.title,
+        redacted: redacted || hidden(),
+        bytes,
+      }
+    },
     createSkill(state) {
       const selection = selectionFor(state)
       let expectedRevision = selection.revision
       let expectedDoc = selection.doc
       let mappedSelection = selection.selection
+      const scope = (): SelectionScope =>
+        state.selectionId === null
+          ? {
+              startIndex: expectedDoc.childCount - 1,
+              endIndex: expectedDoc.childCount - 1,
+              isRange: false,
+            }
+          : getSelectionScope(selection.editor, mappedSelection)
       const assertCurrent = (signal?: AbortSignal, writing = false): void => {
         if (signal?.aborted) throw new WorkspaceAdapterError('cancelled')
         const live = current()
@@ -227,22 +362,23 @@ export function createDocsWorkspaceAdapter(
         assertCurrent(signal, true)
         return deps.beforeFirstWrite?.(selection.editor, signal)
       }
+      let activeWriter: import('./doc-writer').AiDocWriter | undefined
       const original = createDocsSkill(
         () => selection.editor,
         () => deps.getNumIds(),
         () => deps.getTrack?.(),
-        undefined,
-        undefined,
+        deps.reviewStore ? deps.getComments : undefined,
+        deps.layoutStore ? deps.getHf : undefined,
         () => false,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        () => activeWriter,
+        deps.layoutStore ? deps.getPageSetup : undefined,
+        deps.layoutStore ? deps.getExtras : undefined,
+        deps.reviewStore ? deps.getNotes : undefined,
         () => false,
         undefined,
         () => {
           assertCurrent()
-          return getSelectionScope(selection.editor, mappedSelection)
+          return scope()
         },
       )
       const settle = (result: ToolExecution): ToolExecution => {
@@ -258,6 +394,10 @@ export function createDocsWorkspaceAdapter(
         }
         expectedRevision = live.revision
         expectedDoc = live.editor.state.doc
+        selection.revision = live.revision
+        selection.doc = expectedDoc
+        selection.selection = mappedSelection
+        selection.scope = scope()
         return result
       }
       return {
@@ -266,21 +406,30 @@ export function createDocsWorkspaceAdapter(
           assertCurrent()
           return (
             original.systemPrompt +
-            '\n\nThis workspace adapter exposes only local document-body tools. Use only the tools in the current list. Network, media, new-file creation, saving, comments, notes and header/footer stores are unavailable here.'
+            '\n\nThis workspace adapter exposes only the listed local document tools. Network, media, new-file creation and saving are unavailable here. Long-form writing uses write_document when listed. Header/footer, page setup, style, watermark, comment and note tools are available only when listed.'
           )
         },
         get tools() {
-          return original.tools.filter((tool) =>
-            Object.hasOwn(DOCS_WORKSPACE_TOOL_ACCESS, tool.name),
-          )
+          return original.tools
+            .filter((tool) => Object.hasOwn(toolAccess, tool.name))
+            .map((tool) =>
+              tool.name === 'generate_mindmap'
+                ? {
+                    ...tool,
+                    description: tool.description.replace(
+                      ' so the user can jump to the passage',
+                      '',
+                    ),
+                  }
+                : tool,
+            )
         },
         buildContext: () => {
           assertCurrent()
           return original.buildContext?.() ?? ''
         },
         executeTool(call, signal) {
-          const access =
-            DOCS_WORKSPACE_TOOL_ACCESS[call.name as keyof typeof DOCS_WORKSPACE_TOOL_ACCESS]
+          const access = toolAccess[call.name]
           if (!access) throw new WorkspaceAdapterError('unknown-tool')
           assertCurrent(signal, access === 'write')
           if (access === 'write' && deps.getTrack?.()) {
@@ -294,35 +443,124 @@ export function createDocsWorkspaceAdapter(
           }
           const mapSelection = ({ transaction }: { transaction: Transaction }): void => {
             if (!transaction.docChanged) return
+            if (transaction.getMeta(DRAFT_META)) {
+              expectedDoc = selection.editor.state.doc
+              return
+            }
+            const previous = mappedSelection
             // replace_selection deliberately selects the new text; formatting
             // and structural tools only map the original captured selection.
             mappedSelection =
               call.name === 'replace_selection' && transaction.selectionSet
                 ? transaction.selection
                 : mappedSelection.map(transaction.doc, transaction.mapping)
+            if (
+              (!previous.empty && mappedSelection.empty) ||
+              (previous.empty && transaction.mapping.mapResult(previous.head, 1).deletedAcross)
+            )
+              selection.valid = false
           }
           selection.editor.on('transaction', mapSelection)
+          const beforeReview = reviewRevision
+          const beforeLayout = layoutRevision
           let result: ToolExecution | Promise<ToolExecution>
-          try {
-            result = original.executeTool(call, signal)
-          } finally {
+          const cleanup = () => {
             selection.editor.off('transaction', mapSelection)
+            if (call.name === 'write_document') {
+              writer.finish()
+              activeWriter = undefined
+            }
           }
-          return result instanceof Promise ? result.then(settle) : settle(result)
+          try {
+            if (call.name === 'write_document') {
+              const remote = writer.begin(call.id)
+              activeWriter = {
+                async write(spec, progress, writeSignal) {
+                  const result = await remote.write(
+                    spec,
+                    (html) => {
+                      assertCurrent(writeSignal, true)
+                      progress(html)
+                    },
+                    writeSignal,
+                  )
+                  assertCurrent(writeSignal, true)
+                  return result
+                },
+              }
+            }
+            result = original.executeTool(call, signal)
+          } catch (error) {
+            cleanup()
+            throw error
+          }
+
+          const settleStores = (execution: ToolExecution): ToolExecution =>
+            settle({
+              ...execution,
+              ...(execution.display?.kind === 'mindmap'
+                ? {
+                    output:
+                      'Mind map rendered as an interactive workspace chat card. The user can expand branches, export PNG/SVG, or fill a follow-up question for the same target document. This does not modify the document. Reply with one short sentence; do not repeat the map content.',
+                  }
+                : {}),
+              mutated:
+                execution.mutated ||
+                beforeReview !== reviewRevision ||
+                beforeLayout !== layoutRevision,
+            })
+          if (result instanceof Promise) return result.then(settleStores).finally(cleanup)
+          try {
+            return settleStores(result)
+          } finally {
+            cleanup()
+          }
         },
         verifyResponse: original.verifyResponse,
       } satisfies AgentSkill
     },
-    toolAccess: DOCS_WORKSPACE_TOOL_ACCESS,
+    toolAccess,
     rollback: {
-      capture: () => captureRollbackSnapshot(current().editor),
-      restore: (snapshot) => restoreRollbackSnapshot(current().editor, snapshot as ProseMirrorNode),
+      capture: (state) => ({
+        doc: captureRollbackSnapshot(current().editor),
+        review: deps.reviewStore?.capture(),
+        layout: deps.layoutStore?.capture(),
+        selections: [...selections.values()]
+          .filter((selection) => selection.valid && selection.revision === state.revision)
+          .map((selection) => ({ ...selection })),
+      }),
+      restore: (snapshot) => {
+        const saved = snapshot as {
+          doc: ProseMirrorNode
+          review?: DocsReviewState
+          layout?: DocsLayoutState
+          selections: SelectionSnapshot[]
+        }
+        const editor = current().editor
+        if (!editor.state.doc.eq(saved.doc)) restoreRollbackSnapshot(editor, saved.doc)
+        if (saved.review) deps.reviewStore!.restore(saved.review)
+        if (saved.layout) deps.layoutStore!.restore(saved.layout)
+        const live = current()
+        for (const selection of saved.selections) {
+          if (selection.instanceId === live.instanceId && selection.doc.eq(live.editor.state.doc))
+            selections.set(selection.id, {
+              ...selection,
+              revision: live.revision,
+              doc: live.editor.state.doc,
+              selection: selection.selection.getBookmark().resolve(live.editor.state.doc),
+            })
+        }
+        while (selections.size > MAX_SELECTION_SNAPSHOTS)
+          selections.delete(selections.keys().next().value!)
+      },
     },
     beforeFirstWrite: (signal) => {
       if (!prepareFirstWrite) throw new WorkspaceAdapterError('not-ready')
       return prepareFirstWrite(signal)
     },
     dispose() {
+      offReview?.()
+      offLayout?.()
       attached?.off('transaction', onTransaction)
       attached = null
       lastDoc = null
@@ -330,4 +568,5 @@ export function createDocsWorkspaceAdapter(
       selections.clear()
     },
   })
+  return { ...adapter, updateWriter: (id, update, signal) => writer.update(id, update, signal) }
 }

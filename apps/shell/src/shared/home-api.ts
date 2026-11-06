@@ -372,6 +372,7 @@ export interface HomeApi {
   setAuthorName(value: string): Promise<AuthorNameSetting>
   /** AI panel text size + chat-input spellcheck (persisted in userData/app-settings.json) */
   getAiPanelPrefs(): Promise<AiPanelPrefs>
+  onAiPanelPrefsChanged(handler: (prefs: AiPanelPrefs) => void): () => void
   /** merge + persist; broadcasts 'app:ai-panel-prefs-changed' to all web contents */
   setAiPanelPrefs(patch: Partial<AiPanelPrefs>): Promise<AiPanelPrefs>
   /** effective default save folder for new/untitled files (configured in userData/app-settings.json, falls back to <Documents>/GenOffice) */
@@ -403,6 +404,8 @@ export interface HomeApi {
   openRightsContact(): Promise<void>
   /** AI settings (userData/ai-settings.json, shared by every editor) */
   getAiSettings(): Promise<AiSettings>
+  /** Switch to Home and open the existing AI settings screen. */
+  openAiModelSettings(): Promise<void>
   /** persist AI settings; every renderer gets ai:settings-changed and re-reads */
   setAiSettings(settings: AiSettings): Promise<void>
   /** ai-settings.json was rewritten by any renderer (composer model chip, another window) */

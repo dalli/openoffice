@@ -36,6 +36,8 @@ export const fr = {
   aiChipChartData: 'Mettre à jour les données du graphique',
   aiChipChartTitle: 'Modifier le titre du graphique',
   aiChipTableEdit: 'Ajuster lignes/colonnes',
+  aiQueueTransferFailed:
+    'Impossible de transférer les modifications. La file est conservée. Vérifiez le document puis renvoyez la demande.',
   aiQueueTitle: 'Modifications en attente',
   aiQueueHint:
     "Cliquez sur une ligne pour localiser le passage ; l'envoi applique toutes les modifications en une seule requête",

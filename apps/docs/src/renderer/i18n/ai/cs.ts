@@ -35,6 +35,8 @@ export const cs = {
   aiChipChartData: 'Aktualizovat data grafu',
   aiChipChartTitle: 'Změnit název grafu',
   aiChipTableEdit: 'Upravit řádky/sloupce',
+  aiQueueTransferFailed:
+    'Úpravy se nepodařilo předat. Fronta zůstává beze změny. Zkontrolujte dokument a odešlete je znovu.',
   aiQueueTitle: 'Zařazené úpravy',
   aiQueueHint:
     'Klepnutím na řádek najdete jeho pasáž; odeslání použije všechny úpravy jako jeden požadavek',

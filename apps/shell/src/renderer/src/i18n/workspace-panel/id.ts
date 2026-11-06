@@ -1,6 +1,11 @@
 import type { zh } from './zh'
 
 export const id = {
+  sendScope:
+    'Mengirim permintaan membagikan isi dokumen yang akan diedit serta cakupan referensi, lampiran, keterampilan, dan konteks proyek yang Anda pilih kepada AI terpilih.',
+  attachmentLimit: 'Lampirkan hingga 20 file per pesan.',
+  polishPrompt:
+    'Perbaiki tulisan pada pilihan yang telah ditetapkan, atau seluruh dokumen jika tidak ada teks yang dipilih, agar lebih jelas dan lancar.',
   conversation: 'Percakapan',
   newConversation: 'Percakapan baru',
   target: 'Dokumen yang diedit',

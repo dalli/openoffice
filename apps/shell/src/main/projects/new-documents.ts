@@ -123,6 +123,17 @@ export class NewDocumentPlacer {
     }
   }
 
+  /** An explicit workspace conversation owns its project independently of the shell's selection. */
+  placementInProject(
+    projectId: ProjectId | null,
+    docPath: string | null,
+  ): NewDocumentPlacement | null {
+    const root = projectId ? this.deps.guide.projectRoot(projectId) : null
+    return projectId && root
+      ? { projectId, root, dir: newDocumentFolder(root, docPath, this.platform) }
+      : null
+  }
+
   /** The placement of the window or home ask that opened a create flow */
   placementOfOpener(opener: NewDocumentOpener | null | undefined, homeId: number | null) {
     if (!opener) return Promise.resolve(null)
@@ -169,8 +180,10 @@ export class NewDocumentPlacer {
     webContentsId: number,
     fileName: string,
     bytes: Uint8Array,
+    expectedProjectId?: ProjectId,
   ): Promise<string | null> {
     const placement = await this.placementFor(webContentsId)
+    if (expectedProjectId && placement?.projectId !== expectedProjectId) return null
     return placement ? this.write(placement, fileName, bytes) : null
   }
 
